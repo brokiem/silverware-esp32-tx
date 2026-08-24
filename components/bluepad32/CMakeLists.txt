@@ -86,73 +86,9 @@ else()
     message(FATAL_ERROR "Define target")
 endif()
 
-if(CONFIG_IDF_TARGET_ESP32)
-    # Files that are only meant to be compiled on ESP32 (original)
-    list(APPEND srcs
-        # Place here files that are ESP32-only
-         "platform/uni_platform_mightymiggy.c"
-         "platform/uni_platform_nina.c"
-         "platform/uni_platform_unijoysticle.c"
-         "platform/uni_platform_unijoysticle_2.c"
-         "platform/uni_platform_unijoysticle_2plus.c"
-         "platform/uni_platform_unijoysticle_800xl.c"
-         "platform/uni_platform_unijoysticle_a500.c"
-         "platform/uni_platform_unijoysticle_c64.c"
-         "platform/uni_platform_unijoysticle_msx.c"
-         "platform/uni_platform_unijoysticle_singleport.c")
-endif()
-
-#
-# Disabled since it depends on having `compile_gatt.py` somewhere to generate it.
-# More difficult to distribute bluepad32 as a "component".
-# BLE Service
-# to generate .h from .gatt files
-#if (NOT DEFINED BLUEPAD32_ROOT)
-#    set (BLUEPAD32_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../..)
-#    message(WARNING "BLUEPAD32_ROOT not set. Setting to ${BLUEPAD32_ROOT}")
-#endif()
-#
-#if (NOT DEFINED BTSTACK_ROOT)
-#    set (BTSTACK_ROOT ${BLUEPAD32_ROOT}/external/btstack)
-#    message(WARNING "BTSTACK_ROOT not set. Setting to ${BTSTACK_ROOT}")
-#endif()
-#
-#if(NOT CMAKE_BUILD_EARLY_EXPANSION)
-#    # CMAKE_BUILD_EARLY_EXPANSION needed in ESP32 to prevent command is not scriptable.
-#    # See: https://esp32.com/viewtopic.php?t=29402
-#    find_package (Python REQUIRED COMPONENTS Interpreter)
-#    include_directories(${CMAKE_CURRENT_BINARY_DIR})
-#
-#    set(GATT_FILES
-#            "uni_bt_service.gatt")
-#
-#    cmake_print_variables(GATT_FILES)
-#    cmake_print_variables(BLUEPAD32_ROOT)
-#    cmake_print_variables(BTSTACK_ROOT)
-#    foreach(GATT_FILE ${GATT_FILES})
-#            message("Generating GATT DB file")
-#            cmake_print_variables(GATT_FILE)
-#            add_custom_command(
-#                    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${GATT_FILE}.h
-#                    DEPENDS bt/${GATT_FILE}
-#                    COMMAND ${Python_EXECUTABLE}
-#                    ARGS ${BTSTACK_ROOT}/tool/compile_gatt.py ${CMAKE_CURRENT_SOURCE_DIR}/bt/${GATT_FILE} ${CMAKE_CURRENT_BINARY_DIR}/${GATT_FILE}.h
-#            )
-#            list(APPEND srcs ${CMAKE_CURRENT_BINARY_DIR}/${GATT_FILE}.h)
-#    endforeach(GATT_FILE)
-#endif()
-
 # Valid for ESP-IDF only
 if(IDF_TARGET)
-    set(requires "nvs_flash" "btstack" "app_update" "esp_timer")
-
-    if("${IDF_VERSION_MAJOR}" GREATER_EQUAL 5)
-        # When using ESP-IDF v5+, use "normal" components
-        list(APPEND requires "cmd_nvs" "cmd_system")
-    else()
-        # Use legacy components when compiled using ESP-IDF v4.4
-        list(APPEND requires "cmd_nvs_4.4" "cmd_system_4.4")
-    endif()
+    set(requires "nvs_flash" "btstack" "app_update" "esp_timer" "console" "driver" "spi_flash")
 
     idf_component_register(SRCS "${srcs}"
                         INCLUDE_DIRS "include"

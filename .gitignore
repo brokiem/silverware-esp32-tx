@@ -1,9 +1,18 @@
 # esp-idf
 sdkconfig.old
 sdkconfig
+sdkconfig.*
+!sdkconfig.defaults*
+
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+dependencies.lock
+managed_components/
+components/arduino
 
 # misc
-.pioenvs
 .clang_complete
 .gcc-flags.json
 

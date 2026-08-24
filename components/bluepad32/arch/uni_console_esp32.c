@@ -3,15 +3,15 @@
 // http://retro.moe/unijoysticle2
 
 #include "uni_console.h"
+#include "sdkconfig.h"
+
+#ifdef CONFIG_BLUEPAD32_USB_CONSOLE_ENABLE
 
 #include <argtable3/argtable3.h>
-#include <cmd_system.h>
 #include <esp_console.h>
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-
-#include "sdkconfig.h"
 
 #include "bt/uni_bt.h"
 #include "bt/uni_bt_allowlist.h"
@@ -587,3 +587,5 @@ void uni_console_init(void) {
     // vTaskDelete(NULL);
 #endif  // CONFIG_BLUEPAD32_USB_CONSOLE_ENABLE
 }
+
+#endif  // CONFIG_BLUEPAD32_USB_CONSOLE_ENABLE

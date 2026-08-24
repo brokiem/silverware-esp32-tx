@@ -11,7 +11,8 @@ set(srcs
  set(requires
          arduino
          bluepad32
-         btstack)
+         btstack
+         esp_netif)
 
 
 idf_component_register(SRCS "${srcs}"

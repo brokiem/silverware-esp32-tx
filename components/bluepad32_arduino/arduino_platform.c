@@ -18,7 +18,6 @@
 #include <freertos/semphr.h>
 
 #include "bt/uni_bt.h"
-#include "cmd_system.h"
 #include "controller/uni_controller.h"
 #include "platform/uni_platform.h"
 #include "uni_common.h"
@@ -427,7 +426,6 @@ static void version(void) {
     logi("\tCompile Time: %s %s\n", app_desc->date, app_desc->time);
 
     logi("\n");
-    cmd_system_version();
 }
 
 static int cmd_version(int argc, char** argv) {
