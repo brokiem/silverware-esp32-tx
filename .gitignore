@@ -8,9 +8,7 @@ sdkconfig.*
 .pio/
 .pioenvs/
 .piolibdeps/
-dependencies.lock
 managed_components/
-components/arduino
 
 # misc
 .clang_complete

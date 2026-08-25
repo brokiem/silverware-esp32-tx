@@ -1,203 +1,237 @@
 #include <Arduino.h>
-#include <nvs_flash.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <nvs_flash.h>
 
-// BTstack related
+#include <arduino_platform.h>
 #include <btstack_port_esp32.h>
 #include <btstack_run_loop.h>
 #include <btstack_stdio_esp32.h>
-
-// Bluepad32 related
-#include <arduino_platform.h>
 #include <uni.h>
 
 #include "config.h"
-#include "storage/settings.h"
-#include "gamepad/gamepad_manager.h"
-#include "safety/failsafe.h"
-#include "radio/xn297.h"
-#include "radio/bayang.h"
-#include "telemetry/telemetry.h"
 #include "console/console.h"
+#include "gamepad/button_edges.h"
+#include "gamepad/gamepad_manager.h"
+#include "radio/bayang.h"
+#include "radio/xn297.h"
+#include "safety/failsafe.h"
+#include "storage/settings.h"
+#include "telemetry/telemetry.h"
 #include "util/log.h"
 
-static uint8_t tx_id[5];
-static uint8_t hopping_channels[BAYANG_RF_CHANNELS];
-static uint8_t current_channel_idx = 0;
+namespace {
+
+uint8_t tx_id[5] = {};
+uint8_t hopping_channels[BAYANG_RF_CHANNELS] = {};
+bool radio_initialized = false;
+
+void publish_state_change(SystemState previous, SystemState current) {
+    if (previous == current)
+        return;
+    console_publish_event({ConsoleEventType::StateChanged, previous, current});
+}
+
+BayangControlState neutral_control() {
+    // Non-active states keep the RF link alive without allowing motor output.
+    BayangControlState state = {};
+    state.roll = 512;
+    state.pitch = 512;
+    state.yaw = 512;
+    state.throttle = 0;
+    return state;
+}
+
+BayangControlState active_control(const ControlState& controls) {
+    BayangControlState state = {};
+    state.roll = gamepad_get_bayang_channel(controls.rollRaw, false, ROLL_REVERSED, STICK_DEADBAND, ROLL_EXPO);
+    state.pitch = gamepad_get_bayang_channel(controls.pitchRaw, false, PITCH_REVERSED, STICK_DEADBAND, PITCH_EXPO);
+    state.yaw = gamepad_get_bayang_channel(controls.yawRaw, false, YAW_REVERSED, STICK_DEADBAND, YAW_EXPO);
+    state.throttle = gamepad_get_bayang_channel(controls.throttleRaw, true, false, 0.0f, 0.0f);
+    state.aux_flip = controls.btnA;
+    state.aux_inverted = controls.btnX;
+    return state;
+}
+
+bool transmit_packet(const uint8_t* packet) {
+    xn297_set_tx_mode();
+    if (!xn297_write_payload(packet, BAYANG_PACKET_SIZE))
+        return false;
+
+    const int64_t start_us = esp_timer_get_time();
+    while ((esp_timer_get_time() - start_us) <= RADIO_TX_TIMEOUT_US) {
+        const Xn297TxStatus status = xn297_get_tx_status();
+        if (status == Xn297TxStatus::Sent)
+            return true;
+        if (status == Xn297TxStatus::Error)
+            return false;
+        delayMicroseconds(10);
+    }
+    return false;
+}
+
+void control_radio_task(void*) {
+    // This task exclusively owns controller snapshots, safety state, RF, and telemetry.
+    // Bluetooth callbacks only publish the controller pointer atomically.
+    TickType_t wake_tick = xTaskGetTickCount();
+    uint8_t channel_index = 0;
+    uint8_t consecutive_tx_failures = 0;
+    RadioStats stats = {};
+    ControlState controls = {};
+    bool previous_connected = false;
+    ButtonEdgeState previous_buttons = {};
+    SystemState previous_state = failsafe_get_state();
+    int64_t next_status_us = 0;
+
+    if (!radio_initialized) {
+        failsafe_report_radio_error();
+        console_publish_event({ConsoleEventType::RadioInitFailed, previous_state, STATE_RADIO_ERROR});
+        publish_state_change(previous_state, STATE_RADIO_ERROR);
+        previous_state = STATE_RADIO_ERROR;
+    }
+
+    for (;;) {
+        const int64_t cycle_start_us = esp_timer_get_time();
+
+        gamepad_update();
+        gamepad_get_state(&controls);
+        if (controls.connected != previous_connected) {
+            console_publish_event(
+                {controls.connected ? ConsoleEventType::GamepadConnected : ConsoleEventType::GamepadDisconnected,
+                 previous_state, previous_state});
+            previous_connected = controls.connected;
+        }
+
+        const ButtonEdges edges =
+            detect_button_edges(previous_buttons, controls.btnStart, controls.btnView, controls.btnB);
+
+        const SystemState before_update = failsafe_get_state();
+        failsafe_update_at(cycle_start_us, controls.connected, controls.lastUpdateUs,
+                           controls.throttleRaw <= ARM_THROTTLE_MAX, edges.startClicked, edges.viewClicked,
+                           edges.bClicked || (edges.startClicked && before_update == STATE_ACTIVE));
+        SystemState state = failsafe_get_state();
+        publish_state_change(previous_state, state);
+        if (previous_state == STATE_BINDING && state != STATE_BINDING)
+            channel_index = 0;
+        previous_state = state;
+
+        uint8_t packet[BAYANG_PACKET_SIZE] = {};
+        bool should_transmit = false;
+        bool binding_packet = false;
+
+        if (state == STATE_BINDING) {
+            bayang_build_bind_packet(packet, BAYANG_BIND_A3);
+            static const uint8_t bind_address[5] = {};
+            xn297_set_tx_address(bind_address);
+            xn297_set_channel(0);
+            should_transmit = true;
+            binding_packet = true;
+        } else if (state != STATE_RADIO_ERROR) {
+            const BayangControlState bayang = state == STATE_ACTIVE ? active_control(controls) : neutral_control();
+            bayang_build_data_packet(packet, &bayang);
+            xn297_set_tx_address(tx_id);
+            xn297_set_channel(hopping_channels[channel_index]);
+            channel_index = (channel_index + 1) % BAYANG_RF_CHANNELS;
+            should_transmit = true;
+        }
+
+        if (should_transmit) {
+            ++stats.txPackets;
+            if (transmit_packet(packet)) {
+                consecutive_tx_failures = 0;
+
+#if BAYANG_ENABLE_TELEMETRY
+                if (!binding_packet && xn297_set_rx_address(tx_id, BAYANG_PACKET_SIZE)) {
+                    xn297_set_rx_mode();
+                    const int64_t receive_start_us = esp_timer_get_time();
+                    while ((esp_timer_get_time() - receive_start_us) < TELEMETRY_RX_WINDOW_US) {
+                        if (xn297_is_rx_ready()) {
+                            uint8_t received[BAYANG_PACKET_SIZE] = {};
+                            if (xn297_read_payload(received, sizeof(received))) {
+                                if (telemetry_parse(received, esp_timer_get_time()))
+                                    ++stats.telemetryAccepted;
+                                else
+                                    ++stats.telemetryRejected;
+                            } else {
+                                ++stats.telemetryRejected;
+                            }
+                            break;
+                        }
+                        delayMicroseconds(20);
+                    }
+                }
+#endif
+            } else {
+                ++stats.txFailures;
+                ++consecutive_tx_failures;
+                if (consecutive_tx_failures >= RADIO_FAILURE_LIMIT) {
+                    // RADIO_ERROR is intentionally one-way; only a reboot retries hardware setup.
+                    const SystemState old_state = failsafe_get_state();
+                    failsafe_report_radio_error();
+                    state = failsafe_get_state();
+                    console_publish_event({ConsoleEventType::RadioRuntimeFailed, old_state, state});
+                    publish_state_change(old_state, state);
+                    previous_state = state;
+                }
+            }
+        }
+
+        const int64_t cycle_end_us = esp_timer_get_time();
+        if ((cycle_end_us - cycle_start_us) > static_cast<int64_t>(CONTROL_LOOP_PERIOD_MS) * 1000) {
+            ++stats.deadlineMisses;
+        }
+
+        if (cycle_end_us >= next_status_us) {
+            console_publish_status({cycle_end_us, state, controls, telemetry_get_snapshot(cycle_end_us), stats});
+            next_status_us = cycle_end_us + 1000000LL / STATUS_PRINT_HZ;
+        }
+
+        vTaskDelayUntil(&wake_tick, pdMS_TO_TICKS(CONTROL_LOOP_PERIOD_MS));
+    }
+}
+
+}  // namespace
 
 void setup() {
-    // Initialize NVS
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-      ESP_ERROR_CHECK(nvs_flash_erase());
-      ret = nvs_flash_init();
+    esp_err_t result = nvs_flash_init();
+    if (result == ESP_ERR_NVS_NO_FREE_PAGES || result == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        result = nvs_flash_init();
     }
-    ESP_ERROR_CHECK(ret);
+    ESP_ERROR_CHECK(result);
 
-    console_init();
-    LOG("Silverware TX Starting...");
+    if (!console_init())
+        LOG("WARNING: console task unavailable");
+    LOG("Silverware TX starting");
 
-    // Load or generate TX ID
     if (!load_transmitter_id(tx_id)) {
-        generate_and_save_transmitter_id(tx_id);
+        if (!generate_and_save_transmitter_id(tx_id)) {
+            LOG("WARNING: transmitter ID is ephemeral because persistence failed");
+        }
     }
     LOG("TX ID: %02X:%02X:%02X:%02X:%02X", tx_id[0], tx_id[1], tx_id[2], tx_id[3], tx_id[4]);
 
     gamepad_init();
     failsafe_init();
     telemetry_init();
-
-    xn297_init();
+    radio_initialized = xn297_init();
     bayang_init(tx_id);
     bayang_get_hopping_channels(hopping_channels);
+
+    if (xTaskCreatePinnedToCore(control_radio_task, "control_rf", 6144, nullptr, 5, nullptr, 1) != pdPASS) {
+        LOG("FATAL: could not create control/RF task");
+    }
 }
 
 void loop() {
-    int64_t loop_start = esp_timer_get_time();
-    
-    // Process Background Tasks
-    gamepad_update();
-    console_update();
-    
-    struct ControlState cstate;
-    gamepad_get_state(&cstate);
-    
-    // Detect single button clicks (rising edge) so holding never re-triggers actions
-    static bool prev_btnStart = false;
-    static bool prev_btnMenu = false;
-    static bool prev_btnB = false;
-
-    bool start_clicked = (cstate.btnStart && !prev_btnStart);
-    bool view_clicked = (cstate.btnMenu && !prev_btnMenu);
-    bool b_clicked = (cstate.btnB && !prev_btnB);
-
-    prev_btnStart = cstate.btnStart;
-    prev_btnMenu = cstate.btnMenu;
-    prev_btnB = cstate.btnB;
-
-    // Intuitive single-button controls for Xbox controller:
-    // START (☰) = Arm/Unlock (when LOCKED & throttle idle)
-    // VIEW (⧉)  = Bind drone (when LOCKED & throttle idle)
-    // START or B = Disarm/Lock (when ACTIVE)
-    bool throttle_idle = (cstate.throttleRaw < 10);
-    bool unlock_clicked = start_clicked;
-    bool bind_clicked = view_clicked;
-    bool disarm_clicked = start_clicked || b_clicked;
-    
-    failsafe_update(cstate.connected, cstate.lastUpdateUs, throttle_idle, unlock_clicked, bind_clicked, disarm_clicked);
-    
-    enum SystemState sys_state = failsafe_get_state();
-    
-    uint8_t packet[BAYANG_PACKET_SIZE];
-    bool transmit = false;
-    
-    if (sys_state == STATE_BINDING) {
-        bayang_build_bind_packet(packet, BAYANG_BIND_A3);
-        xn297_set_tx_address((const uint8_t*)"\x00\x00\x00\x00\x00");
-        xn297_set_channel(0); // Bind channel
-        transmit = true;
-    } else if (sys_state == STATE_ACTIVE) {
-        struct BayangControlState bstate;
-        bstate.roll = gamepad_get_bayang_channel(cstate.rollRaw, false, ROLL_REVERSED, STICK_DEADBAND, ROLL_EXPO);
-        bstate.pitch = gamepad_get_bayang_channel(cstate.pitchRaw, false, PITCH_REVERSED, STICK_DEADBAND, PITCH_EXPO);
-        bstate.yaw = gamepad_get_bayang_channel(cstate.yawRaw, false, YAW_REVERSED, STICK_DEADBAND, YAW_EXPO);
-        bstate.throttle = gamepad_get_bayang_channel(cstate.throttleRaw, true, false, 0.0f, 0.0f);
-        
-        bstate.aux_flip = cstate.btnA;
-        bstate.aux_rth = false;
-        bstate.aux_headless = false;
-        bstate.aux_picture = false;
-        bstate.aux_video = false;
-        bstate.aux_take_off = false;
-        bstate.aux_inverted = false;
-        bstate.aux_emg_stop = cstate.btnX; // Example mapped to X
-        
-        bayang_build_data_packet(packet, &bstate);
-        xn297_set_tx_address(tx_id);
-        xn297_set_channel(hopping_channels[current_channel_idx]);
-        transmit = true;
-        
-        current_channel_idx = (current_channel_idx + 1) % BAYANG_RF_CHANNELS;
-    } else if (sys_state == STATE_LOCKED || sys_state == STATE_WAIT_GAMEPAD) {
-        // Send zero throttle packet to keep drone connected but disarmed?
-        // Or send nothing? Sending nothing might trigger drone failsafe, which is good.
-        // But if drone is already connected, it will beep.
-        // Let's send failsafe packets (throttle=0, roll=pitch=yaw=512)
-        struct BayangControlState bstate;
-        bstate.roll = 512;
-        bstate.pitch = 512;
-        bstate.yaw = 512;
-        bstate.throttle = 0;
-        bstate.aux_flip = false; bstate.aux_rth = false; bstate.aux_headless = false;
-        bstate.aux_picture = false; bstate.aux_video = false; bstate.aux_take_off = false;
-        bstate.aux_inverted = false; bstate.aux_emg_stop = false;
-        
-        bayang_build_data_packet(packet, &bstate);
-        xn297_set_tx_address(tx_id);
-        xn297_set_channel(hopping_channels[current_channel_idx]);
-        transmit = true;
-        
-        current_channel_idx = (current_channel_idx + 1) % BAYANG_RF_CHANNELS;
-    }
-    
-    if (transmit) {
-        xn297_set_tx_mode();
-        xn297_write_payload(packet, BAYANG_PACKET_SIZE);
-        
-        // Wait for TX to finish (takes ~200us at 1Mbps for 22 bytes)
-        int64_t tx_wait_start = esp_timer_get_time();
-        while (!xn297_is_tx_done() && (esp_timer_get_time() - tx_wait_start < 1000)) {
-            delayMicroseconds(10);
-        }
-        
-#if BAYANG_ENABLE_TELEMETRY
-        if (sys_state != STATE_BINDING) {
-            // Switch to RX for telemetry
-            xn297_set_rx_address(tx_id, BAYANG_PACKET_SIZE);
-            xn297_set_rx_mode();
-            
-            // Wait for telemetry for up to 2.5ms
-            int64_t rx_wait_start = esp_timer_get_time();
-            while ((esp_timer_get_time() - rx_wait_start < 2500)) {
-                if (xn297_is_rx_ready()) {
-                    uint8_t rx_packet[32];
-                    if (xn297_read_payload(rx_packet, BAYANG_PACKET_SIZE)) {
-                        telemetry_parse(rx_packet, esp_timer_get_time());
-                    }
-                    break;
-                }
-                delayMicroseconds(20);
-            }
-        }
-#endif
-    }
-    
-    // Deterministic delay for 5ms loop with FreeRTOS yield to feed watchdog
-    int64_t loop_end = esp_timer_get_time();
-    int64_t elapsed = loop_end - loop_start;
-    int64_t target_delay = 5000 - elapsed;
-    
-    if (target_delay >= 1000) {
-        // Yield to FreeRTOS (IDLE task) for the millisecond portion
-        vTaskDelay(pdMS_TO_TICKS(target_delay / 1000));
-        // Precise remainder in microseconds
-        int64_t remaining = 5000 - (esp_timer_get_time() - loop_start);
-        if (remaining > 0) {
-            delayMicroseconds(remaining);
-        }
-    } else {
-        // Always yield at least 1 tick to prevent IDLE task starvation
-        vTaskDelay(1);
-    }
+    vTaskDelay(portMAX_DELAY);
 }
 
 extern "C" int app_main(void) {
     btstack_init();
     uni_platform_set_custom(get_arduino_platform());
-    uni_init(0, NULL);
+    uni_init(0, nullptr);
     btstack_run_loop_execute();
     return 0;
 }
-

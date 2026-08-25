@@ -1,11 +1,12 @@
 #include "nrf24.h"
-#include "../config.h"
 #include <Arduino.h>
 #include <SPI.h>
+#include "../config.h"
+#include "radio_validation.h"
 
 static SPIClass* spi = nullptr;
 
-void nrf24_init() {
+bool nrf24_init() {
     if (!spi) {
         spi = new SPIClass(VSPI);
         spi->begin(PIN_NRF_SCK, PIN_NRF_MISO, PIN_NRF_MOSI, PIN_NRF_CSN);
@@ -14,30 +15,38 @@ void nrf24_init() {
     digitalWrite(PIN_NRF_CE, LOW);
     pinMode(PIN_NRF_CSN, OUTPUT);
     digitalWrite(PIN_NRF_CSN, HIGH);
-    
+
     // Default config matching Multiprotocol XN297_EMU setup for NRF24
     nrf24_set_standby();
     nrf24_flush_tx();
     nrf24_flush_rx();
-    nrf24_write_reg(NRF24_REG_EN_AA, 0x00); // No Auto Acknowldgement
-    nrf24_write_reg(NRF24_REG_EN_RXADDR, 0x01); // Enable data pipe 0 only
-    nrf24_write_reg(NRF24_REG_SETUP_AW, 0x03); // 5 bytes rx/tx address
-    nrf24_write_reg(NRF24_REG_SETUP_RETR, 0x00); // no retransmits
-    
+    nrf24_write_reg(NRF24_REG_EN_AA, 0x00);       // No auto acknowledgement
+    nrf24_write_reg(NRF24_REG_EN_RXADDR, 0x01);   // Enable data pipe 0 only
+    nrf24_write_reg(NRF24_REG_SETUP_AW, 0x03);    // 5 bytes rx/tx address
+    nrf24_write_reg(NRF24_REG_SETUP_RETR, 0x00);  // no retransmits
+
     // Set RF Power
     uint8_t rf_setup = 0x00;
 #if BAYANG_RF_POWER == 0
-    rf_setup = 0x00; // -18dBm
+    rf_setup = 0x00;  // -18dBm
 #elif BAYANG_RF_POWER == 1
-    rf_setup = 0x02; // -12dBm
+    rf_setup = 0x02;  // -12dBm
 #elif BAYANG_RF_POWER == 2
-    rf_setup = 0x04; // -6dBm
+    rf_setup = 0x04;  // -6dBm
 #else
-    rf_setup = 0x06; // 0dBm
+    rf_setup = 0x06;  // 0dBm
 #endif
-    nrf24_write_reg(NRF24_REG_RF_SETUP, rf_setup); // 1Mbps
-    nrf24_write_reg(NRF24_REG_DYNPD, 0x00); // Disable dynamic payload length
-    nrf24_write_reg(NRF24_REG_FEATURE, 0x01); // Allow NO_ACK
+    nrf24_write_reg(NRF24_REG_RF_SETUP, rf_setup);  // 1Mbps
+    nrf24_write_reg(NRF24_REG_DYNPD, 0x00);         // Disable dynamic payload length
+    nrf24_write_reg(NRF24_REG_FEATURE, 0x01);       // Allow NO_ACK
+
+    if (!nrf24_test())
+        return false;
+
+    // Power up into TX standby once. Subsequent TX/RX changes keep PWR_UP set.
+    nrf24_write_reg(NRF24_REG_CONFIG, 0x02);
+    delayMicroseconds(2000);
+    return true;
 }
 
 bool nrf24_test() {
@@ -96,7 +105,9 @@ void nrf24_flush_rx() {
     digitalWrite(PIN_NRF_CSN, HIGH);
 }
 
-void nrf24_write_payload(const uint8_t* buf, uint8_t len) {
+bool nrf24_write_payload(const uint8_t* buf, uint8_t len) {
+    if (!buf || !nrf24_payload_length_valid(len))
+        return false;
     digitalWrite(PIN_NRF_CSN, LOW);
     spi->beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
     spi->transfer(NRF24_W_TX_PAYLOAD);
@@ -105,9 +116,12 @@ void nrf24_write_payload(const uint8_t* buf, uint8_t len) {
     }
     spi->endTransaction();
     digitalWrite(PIN_NRF_CSN, HIGH);
+    return true;
 }
 
-void nrf24_read_payload(uint8_t* buf, uint8_t len) {
+bool nrf24_read_payload(uint8_t* buf, uint8_t len) {
+    if (!buf || !nrf24_payload_length_valid(len))
+        return false;
     digitalWrite(PIN_NRF_CSN, LOW);
     spi->beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
     spi->transfer(NRF24_R_RX_PAYLOAD);
@@ -116,25 +130,26 @@ void nrf24_read_payload(uint8_t* buf, uint8_t len) {
     }
     spi->endTransaction();
     digitalWrite(PIN_NRF_CSN, HIGH);
+    return true;
 }
 
 void nrf24_set_tx_mode() {
     digitalWrite(PIN_NRF_CE, LOW);
     nrf24_flush_tx();
-    nrf24_write_reg(NRF24_REG_CONFIG, 0x02); // PWR_UP | TX (No CRC)
+    nrf24_write_reg(NRF24_REG_CONFIG, 0x02);  // PWR_UP | TX (No CRC)
     digitalWrite(PIN_NRF_CE, HIGH);
 }
 
 void nrf24_set_rx_mode() {
     digitalWrite(PIN_NRF_CE, LOW);
     nrf24_flush_rx();
-    nrf24_write_reg(NRF24_REG_CONFIG, 0x03); // PWR_UP | RX (No CRC)
+    nrf24_write_reg(NRF24_REG_CONFIG, 0x03);  // PWR_UP | RX (No CRC)
     digitalWrite(PIN_NRF_CE, HIGH);
 }
 
 void nrf24_set_standby() {
     digitalWrite(PIN_NRF_CE, LOW);
-    nrf24_write_reg(NRF24_REG_CONFIG, 0x00); // PWR_DOWN
+    nrf24_write_reg(NRF24_REG_CONFIG, 0x00);  // PWR_DOWN
 }
 
 void nrf24_set_channel(uint8_t channel) {

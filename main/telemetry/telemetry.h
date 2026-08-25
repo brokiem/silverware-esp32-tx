@@ -1,6 +1,6 @@
 #pragma once
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 struct TelemetryData {
     float batteryRawV;
@@ -11,10 +11,20 @@ struct TelemetryData {
     uint16_t pidI;
     uint16_t pidD;
     int64_t lastValidUs;
-    bool valid;
+};
+
+enum class TelemetryFreshness : uint8_t {
+    Never,
+    Fresh,
+    Stale,
+};
+
+struct TelemetrySnapshot {
+    TelemetryData data;
+    TelemetryFreshness freshness;
+    int64_t ageUs;
 };
 
 void telemetry_init();
-void telemetry_parse(const uint8_t* packet, int64_t current_time_us);
-bool telemetry_get_data(struct TelemetryData* data);
-
+bool telemetry_parse(const uint8_t* packet, int64_t current_time_us);
+TelemetrySnapshot telemetry_get_snapshot(int64_t current_time_us);

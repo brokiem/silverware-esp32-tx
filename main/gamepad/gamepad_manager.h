@@ -1,6 +1,6 @@
 #pragma once
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 struct ControlState {
     int16_t rollRaw;
@@ -17,7 +17,7 @@ struct ControlState {
     bool btnL3;
     bool btnR3;
     bool btnStart;
-    bool btnMenu;
+    bool btnView;
     bool btnDPadUp;
     bool btnDPadDown;
     bool btnDPadLeft;
@@ -28,7 +28,7 @@ struct ControlState {
 };
 
 void gamepad_init();
-void gamepad_update(); // Must be called periodically from application task
-void gamepad_get_state(struct ControlState* state);
-uint16_t gamepad_get_bayang_channel(int16_t raw_value, bool is_throttle, bool reversed, float deadband, float expo);
-
+// Update and snapshot access must stay on the single-owner control/RF task.
+void gamepad_update();
+void gamepad_get_state(ControlState* state);
+uint16_t gamepad_get_bayang_channel(int32_t raw_value, bool is_throttle, bool reversed, float deadband, float expo);
