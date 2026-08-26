@@ -15,6 +15,7 @@
 #include "gamepad/button_edges.h"
 #include "gamepad/gamepad_manager.h"
 #include "radio/bayang.h"
+#include "radio/nfe_silverware_profile.h"
 #include "radio/xn297.h"
 #include "safety/failsafe.h"
 #include "storage/settings.h"
@@ -43,14 +44,20 @@ BayangControlState neutral_control() {
     return state;
 }
 
-BayangControlState active_control(const ControlState& controls) {
+BayangControlState locked_control(const ControlState& controls) {
+    // L3 deliberately enables pitch-only FC gestures while throttle and CH5 remain off.
+    const uint16_t pitch =
+        gamepad_get_bayang_channel(controls.pitchRaw, false, PITCH_REVERSED, STICK_DEADBAND, PITCH_EXPO);
+    return nfe_silverware_make_locked_control(controls.connected && controls.btnL3, pitch);
+}
+
+BayangControlState active_control(const ControlState& controls, const NfeSilverwareAuxState& aux_state) {
     BayangControlState state = {};
     state.roll = gamepad_get_bayang_channel(controls.rollRaw, false, ROLL_REVERSED, STICK_DEADBAND, ROLL_EXPO);
     state.pitch = gamepad_get_bayang_channel(controls.pitchRaw, false, PITCH_REVERSED, STICK_DEADBAND, PITCH_EXPO);
     state.yaw = gamepad_get_bayang_channel(controls.yawRaw, false, YAW_REVERSED, STICK_DEADBAND, YAW_EXPO);
     state.throttle = gamepad_get_bayang_channel(controls.throttleRaw, true, false, 0.0f, 0.0f);
-    state.aux_flip = controls.btnA;
-    state.aux_inverted = controls.btnX;
+    nfe_silverware_apply_multi_aux(&state, true, aux_state);
     return state;
 }
 
@@ -81,6 +88,7 @@ void control_radio_task(void*) {
     ControlState controls = {};
     bool previous_connected = false;
     ButtonEdgeState previous_buttons = {};
+    NfeSilverwareAuxState aux_state = {};
     SystemState previous_state = failsafe_get_state();
     int64_t next_status_us = 0;
 
@@ -115,20 +123,25 @@ void control_radio_task(void*) {
         if (previous_state == STATE_BINDING && state != STATE_BINDING)
             channel_index = 0;
         previous_state = state;
+        nfe_silverware_update_aux(&aux_state, state == STATE_ACTIVE, controls.btnA, controls.btnX, controls.btnY,
+                                  controls.btnRB, controls.btnLB);
 
         uint8_t packet[BAYANG_PACKET_SIZE] = {};
         bool should_transmit = false;
         bool binding_packet = false;
 
         if (state == STATE_BINDING) {
-            bayang_build_bind_packet(packet, BAYANG_BIND_A3);
+            const uint8_t bind_header = bayang_select_bind_header(BAYANG_ENABLE_TELEMETRY, BAYANG_ENABLE_ANALOG_AUX);
+            bayang_build_bind_packet(packet, bind_header);
             static const uint8_t bind_address[5] = {};
             xn297_set_tx_address(bind_address);
             xn297_set_channel(0);
             should_transmit = true;
             binding_packet = true;
         } else if (state != STATE_RADIO_ERROR) {
-            const BayangControlState bayang = state == STATE_ACTIVE ? active_control(controls) : neutral_control();
+            const BayangControlState bayang =
+                state == STATE_ACTIVE ? active_control(controls, aux_state)
+                                      : (state == STATE_LOCKED ? locked_control(controls) : neutral_control());
             bayang_build_data_packet(packet, &bayang);
             xn297_set_tx_address(tx_id);
             xn297_set_channel(hopping_channels[channel_index]);

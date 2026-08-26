@@ -35,6 +35,12 @@ void bayang_get_hopping_channels(uint8_t* channels) {
     memcpy(channels, hopping_channels, BAYANG_RF_CHANNELS);
 }
 
+uint8_t bayang_select_bind_header(bool telemetry_enabled, bool analog_aux_enabled) {
+    if (analog_aux_enabled)
+        return telemetry_enabled ? BAYANG_BIND_A1 : BAYANG_BIND_A2;
+    return telemetry_enabled ? BAYANG_BIND_A3 : BAYANG_BIND_A4;
+}
+
 void bayang_build_bind_packet(uint8_t* packet, uint8_t bind_header) {
     memset(packet, 0, BAYANG_PACKET_SIZE);
     packet[0] = bind_header;

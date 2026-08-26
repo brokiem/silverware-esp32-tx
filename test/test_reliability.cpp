@@ -8,6 +8,7 @@
 #include "../main/gamepad/button_edges.h"
 #include "../main/gamepad/control_mapping.h"
 #include "../main/radio/bayang.h"
+#include "../main/radio/nfe_silverware_profile.h"
 #include "../main/radio/radio_validation.h"
 #include "../main/safety/failsafe.h"
 #include "../main/storage/settings.h"
@@ -149,6 +150,81 @@ static void test_bayang_bind_packet_and_hopping() {
     TEST_ASSERT_EQUAL_UINT8_ARRAY(tx_id, &packet[1], 5);
     TEST_ASSERT_EQUAL_UINT8_ARRAY(channels, &packet[6], 4);
     TEST_ASSERT_TRUE(bayang_check_telemetry(packet) == false);
+}
+
+static void test_nfe_silverware_autobind_multi_profile() {
+    TEST_ASSERT_EQUAL_HEX8(BAYANG_BIND_A1, bayang_select_bind_header(true, true));
+    TEST_ASSERT_EQUAL_HEX8(BAYANG_BIND_A2, bayang_select_bind_header(false, true));
+    TEST_ASSERT_EQUAL_HEX8(BAYANG_BIND_A3, bayang_select_bind_header(true, false));
+    TEST_ASSERT_EQUAL_HEX8(BAYANG_BIND_A4, bayang_select_bind_header(false, false));
+
+    const uint8_t tx_id[5] = {0x10, 0x20, 0x30, 0x04, 0x50};
+    bayang_init(tx_id);
+    uint8_t packet[BAYANG_PACKET_SIZE] = {};
+    bayang_build_bind_packet(packet, bayang_select_bind_header(BAYANG_ENABLE_TELEMETRY, BAYANG_ENABLE_ANALOG_AUX));
+
+    TEST_ASSERT_EQUAL_HEX8(BAYANG_BIND_A3, packet[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x0A, packet[13]);
+    TEST_ASSERT_EQUAL_INT(5, CONTROL_LOOP_PERIOD_MS);
+
+    struct AuxMappingCase {
+        bool buttonA;
+        bool buttonX;
+        bool buttonY;
+        bool buttonRB;
+        bool buttonLB;
+        uint8_t packet2;
+        uint8_t packet3;
+    };
+    const AuxMappingCase cases[] = {
+        {true, false, false, false, false, BAYANG_FLAG_FLIP | BAYANG_FLAG_RTH, 0},
+        {false, true, false, false, false, BAYANG_FLAG_FLIP | BAYANG_FLAG_PICTURE, 0},
+        {false, false, true, false, false, BAYANG_FLAG_FLIP | BAYANG_FLAG_VIDEO, 0},
+        {false, false, false, true, false, BAYANG_FLAG_FLIP | BAYANG_FLAG_HEADLESS, 0},
+        {false, false, false, false, true, BAYANG_FLAG_FLIP, BAYANG_FLAG_INVERTED},
+    };
+
+    // Rajawali USE_MULTI: CH5=arm/idle, CH6=level, CH7=race, CH8=horizon,
+    // CH9=PID profile, and CH10=LEDs.
+    for (const AuxMappingCase& mapping : cases) {
+        NfeSilverwareAuxState single_aux = {};
+        nfe_silverware_update_aux(&single_aux, true, mapping.buttonA, mapping.buttonX, mapping.buttonY,
+                                  mapping.buttonRB, mapping.buttonLB);
+        BayangControlState single_control = {};
+        nfe_silverware_apply_multi_aux(&single_control, true, single_aux);
+        bayang_build_data_packet(packet, &single_control);
+        TEST_ASSERT_EQUAL_HEX8(mapping.packet2, packet[2]);
+        TEST_ASSERT_EQUAL_HEX8(mapping.packet3, packet[3]);
+    }
+
+    NfeSilverwareAuxState aux = {};
+    nfe_silverware_update_aux(&aux, true, true, true, true, true, true);
+    BayangControlState controls = {};
+
+    // Held buttons do not retrigger; a second rising edge toggles the mode off.
+    nfe_silverware_update_aux(&aux, true, true, true, true, true, true);
+    TEST_ASSERT_TRUE(aux.levelMode);
+    nfe_silverware_update_aux(&aux, true, false, false, false, false, false);
+    nfe_silverware_update_aux(&aux, true, true, false, false, false, false);
+    TEST_ASSERT_FALSE(aux.levelMode);
+
+    // Disarming clears every FC mode and CH5.
+    nfe_silverware_update_aux(&aux, false, false, false, false, false, false);
+    controls = {};
+    nfe_silverware_apply_multi_aux(&controls, false, aux);
+    bayang_build_data_packet(packet, &controls);
+    TEST_ASSERT_EQUAL_HEX8(0, packet[2]);
+    TEST_ASSERT_EQUAL_HEX8(0, packet[3]);
+
+    // Locked gesture passthrough changes pitch only and cannot arm or add throttle.
+    controls = nfe_silverware_make_locked_control(true, 1023);
+    bayang_build_data_packet(packet, &controls);
+    TEST_ASSERT_EQUAL_HEX8(0, packet[2]);
+    TEST_ASSERT_EQUAL_HEX8(0, packet[3]);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, packet[6]);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, packet[7]);
+    TEST_ASSERT_EQUAL_HEX8(0x7C, packet[8]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, packet[9]);
 }
 
 static void test_radio_length_guards_and_status_decode() {
@@ -296,6 +372,7 @@ int main(int, char**) {
     RUN_TEST(test_bayang_packet_flags_clamping_and_checksum);
     RUN_TEST(test_golden_centered_packet_and_individual_aux_masks);
     RUN_TEST(test_bayang_bind_packet_and_hopping);
+    RUN_TEST(test_nfe_silverware_autobind_multi_profile);
     RUN_TEST(test_radio_length_guards_and_status_decode);
     RUN_TEST(test_telemetry_validation_and_freshness);
     RUN_TEST(test_telemetry_never_state);

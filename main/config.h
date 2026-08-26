@@ -10,7 +10,9 @@
 // IRQ is optional and not used in this implementation (polling is used)
 #define PIN_NRF_IRQ 27
 
-// Protocol configuration
+// Matches the FC configuration:
+//   #define RX_BAYANG_PROTOCOL_TELEMETRY_AUTOBIND
+//   #define USE_MULTI
 #define BAYANG_ENABLE_TELEMETRY 1
 #define BAYANG_ENABLE_ANALOG_AUX 0
 #define BAYANG_RF_POWER 3  // 0=MIN, 1=LOW, 2=HIGH, 3=MAX (for NRF24)
@@ -44,6 +46,8 @@ static_assert(THROTTLE_SOURCE == ThrottleSource::Trigger || THROTTLE_SOURCE == T
 #define ARM_THROTTLE_MAX 10
 #define BIND_DURATION_US 2000000
 #define TELEMETRY_RX_WINDOW_US 2500
+
+static_assert(CONTROL_LOOP_PERIOD_MS == 5, "NFE Silverware telemetry expects a 5 ms packet period");
 
 // Debug configuration
 #define STATUS_PRINT_HZ 5

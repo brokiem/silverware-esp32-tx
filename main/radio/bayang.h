@@ -44,6 +44,7 @@ struct BayangControlState {
 
 void bayang_init(const uint8_t* tx_id);
 void bayang_get_hopping_channels(uint8_t* channels);
+uint8_t bayang_select_bind_header(bool telemetry_enabled, bool analog_aux_enabled);
 void bayang_build_bind_packet(uint8_t* packet, uint8_t bind_header);
 void bayang_build_data_packet(uint8_t* packet, const struct BayangControlState* state);
 bool bayang_check_telemetry(const uint8_t* packet);
