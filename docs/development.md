@@ -28,6 +28,14 @@ Run this command from the project root:
 pio run -e esp32dev
 ```
 
+The optional binary USB telemetry build uses a separate environment:
+
+```sh
+pio run -e esp32dev-pc-telemetry
+```
+
+Its wire format is documented in [PC telemetry bridge](pc-telemetry-bridge.md).
+
 The build downloads managed dependencies when necessary.
 
 ## Flash the ESP32
@@ -45,6 +53,7 @@ Run both commands before you commit:
 ```sh
 pio test -e native
 pio run -e esp32dev
+pio run -e esp32dev-pc-telemetry
 ```
 
 Also run this check for whitespace errors:

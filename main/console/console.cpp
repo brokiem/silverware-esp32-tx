@@ -5,6 +5,10 @@
 #include <freertos/queue.h>
 #include <freertos/task.h>
 
+#include "../config.h"
+
+#if SERIAL_OUTPUT_MODE == SERIAL_OUTPUT_TEXT
+
 namespace {
 
 QueueHandle_t status_queue = nullptr;
@@ -160,3 +164,15 @@ void console_publish_event(const ConsoleEvent& event) {
     if (event_queue != nullptr)
         xQueueSend(event_queue, &event, 0);
 }
+
+#else
+
+bool console_init() {
+    return true;
+}
+
+void console_publish_status(const ConsoleStatus&) {}
+
+void console_publish_event(const ConsoleEvent&) {}
+
+#endif

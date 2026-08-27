@@ -17,6 +17,16 @@
 #define BAYANG_ENABLE_ANALOG_AUX 0
 #define BAYANG_RF_POWER 3  // 0=MIN, 1=LOW, 2=HIGH, 3=MAX (for NRF24)
 
+// USB serial output. Text is the default; select PC telemetry in a build flag.
+#define SERIAL_OUTPUT_TEXT 0
+#define SERIAL_OUTPUT_PC_TELEMETRY 1
+#ifndef SERIAL_OUTPUT_MODE
+#define SERIAL_OUTPUT_MODE SERIAL_OUTPUT_TEXT
+#endif
+#if SERIAL_OUTPUT_MODE != SERIAL_OUTPUT_TEXT && SERIAL_OUTPUT_MODE != SERIAL_OUTPUT_PC_TELEMETRY
+#error "Unsupported serial output mode"
+#endif
+
 enum class ThrottleSource : uint8_t {
     Trigger = 1,
     LeftStickHalf = 2,

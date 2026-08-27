@@ -2,6 +2,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "../config.h"
+
 #if defined(ESP_PLATFORM) || defined(ARDUINO)
 #include <esp_timer.h>
 static inline void print_timestamp(void) {
@@ -19,8 +21,14 @@ static inline void print_timestamp(void) {
 }
 #endif
 
+#if SERIAL_OUTPUT_MODE == SERIAL_OUTPUT_TEXT
 #define LOG(fmt, ...)                    \
     do {                                 \
         print_timestamp();               \
         printf(fmt "\n", ##__VA_ARGS__); \
     } while (0)
+#else
+#define LOG(...) \
+    do {         \
+    } while (0)
+#endif

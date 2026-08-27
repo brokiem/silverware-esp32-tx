@@ -20,6 +20,8 @@
 #include "safety/failsafe.h"
 #include "storage/settings.h"
 #include "telemetry/telemetry.h"
+#include "telemetry/pc_telemetry_export.h"
+#include "telemetry/pc_telemetry_state.h"
 #include "util/log.h"
 
 namespace {
@@ -91,6 +93,9 @@ void control_radio_task(void*) {
     NfeSilverwareAuxState aux_state = {};
     SystemState previous_state = failsafe_get_state();
     int64_t next_status_us = 0;
+#if SERIAL_OUTPUT_MODE == SERIAL_OUTPUT_PC_TELEMETRY
+    int64_t next_local_state_us = 0;
+#endif
 
     if (!radio_initialized) {
         failsafe_report_radio_error();
@@ -176,9 +181,12 @@ void control_radio_task(void*) {
                         // hammering STATUS over SPI throughout every RX window.
                         if (xn297_irq_asserted() && xn297_is_rx_ready()) {
                             uint8_t received[BAYANG_PACKET_SIZE] = {};
-                            if (xn297_read_payload(received, sizeof(received)) &&
-                                telemetry_parse(received, esp_timer_get_time())) {
+                            const int64_t received_us = esp_timer_get_time();
+                            if (xn297_read_payload(received, sizeof(received)) && telemetry_parse(received, received_us)) {
                                 ++stats.telemetryAccepted;
+#if SERIAL_OUTPUT_MODE == SERIAL_OUTPUT_PC_TELEMETRY
+                                pc_telemetry_export_publish_bayang(received, received_us);
+#endif
                             } else {
                                 ++stats.telemetryRejected;
                             }
@@ -208,6 +216,27 @@ void control_radio_task(void*) {
             ++stats.deadlineMisses;
         }
 
+#if SERIAL_OUTPUT_MODE == SERIAL_OUTPUT_PC_TELEMETRY
+        if (pc_telemetry_local_state_due(cycle_end_us, &next_local_state_us)) {
+            PcTelemetryLocalStateInput local_input = {};
+            local_input.nowUs = cycle_end_us;
+            local_input.systemState = state;
+            local_input.controls = controls;
+            local_input.auxState = aux_state;
+            local_input.radioInitialized = radio_initialized;
+            local_input.consecutiveTxFailures = consecutive_tx_failures;
+            local_input.nextHoppingChannelIndex = channel_index;
+            local_input.telemetry = telemetry_get_snapshot(cycle_end_us);
+            local_input.txPackets = stats.txPackets;
+            local_input.txFailures = stats.txFailures;
+            local_input.telemetryAccepted = stats.telemetryAccepted;
+            local_input.telemetryRejected = stats.telemetryRejected;
+            local_input.deadlineMisses = stats.deadlineMisses;
+            local_input.exportQueueDrops = pc_telemetry_export_drop_count();
+            pc_telemetry_export_publish_local_state(pc_telemetry_make_local_state(local_input), cycle_end_us);
+        }
+#endif
+
         if (cycle_end_us >= next_status_us) {
             console_publish_status({cycle_end_us, state, controls, telemetry_get_snapshot(cycle_end_us), stats});
             next_status_us = cycle_end_us + 1000000LL / STATUS_PRINT_HZ;
@@ -227,8 +256,12 @@ void setup() {
     }
     ESP_ERROR_CHECK(result);
 
+#if SERIAL_OUTPUT_MODE == SERIAL_OUTPUT_TEXT
     if (!console_init())
         LOG("WARNING: console task unavailable");
+#else
+    pc_telemetry_export_init();
+#endif
     LOG("Silverware TX starting");
 
     if (!load_transmitter_id(tx_id)) {

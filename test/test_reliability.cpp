@@ -13,6 +13,8 @@
 #include "../main/safety/failsafe.h"
 #include "../main/storage/settings.h"
 #include "../main/telemetry/telemetry.h"
+#include "../main/telemetry/pc_telemetry_protocol.h"
+#include "../main/telemetry/pc_telemetry_state.h"
 
 static void set_checksum(uint8_t* packet) {
     uint8_t checksum = 0;
@@ -501,6 +503,269 @@ static void test_extended_sequence_checksum_and_protocol_transitions() {
     TEST_ASSERT_EQUAL(static_cast<int>(FlightMode::Unknown), static_cast<int>(snapshot.data.flightMode));
 }
 
+static void test_pc_telemetry_crc_and_cobs() {
+    const uint8_t crc_vector[] = {'1', '2', '3', '4', '5', '6', '7', '8', '9'};
+    TEST_ASSERT_EQUAL_HEX16(0x29B1, pc_telemetry_crc16_ccitt_false(crc_vector, sizeof(crc_vector)));
+
+    const uint8_t input[] = {0x00, 0x11, 0x00, 0x22, 0x33, 0x00};
+    uint8_t encoded[16] = {};
+    const size_t encoded_length = pc_telemetry_cobs_encode(input, sizeof(input), encoded, sizeof(encoded));
+    TEST_ASSERT_GREATER_THAN_UINT32(0, encoded_length);
+    uint8_t decoded[sizeof(input)] = {};
+    size_t decoded_length = 0;
+    TEST_ASSERT_TRUE(
+        pc_telemetry_cobs_decode(encoded, encoded_length, decoded, sizeof(decoded), &decoded_length));
+    TEST_ASSERT_EQUAL_UINT32(sizeof(input), decoded_length);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(input, decoded, sizeof(input));
+
+    uint8_t maximum_input[254];
+    memset(maximum_input, 0xA5, sizeof(maximum_input));
+    uint8_t maximum_encoded[256] = {};
+    TEST_ASSERT_EQUAL_UINT32(sizeof(maximum_encoded), pc_telemetry_cobs_max_encoded_size(sizeof(maximum_input)));
+    const size_t maximum_encoded_length =
+        pc_telemetry_cobs_encode(maximum_input, sizeof(maximum_input), maximum_encoded, sizeof(maximum_encoded));
+    TEST_ASSERT_EQUAL_UINT32(sizeof(maximum_encoded), maximum_encoded_length);
+    uint8_t maximum_decoded[sizeof(maximum_input)] = {};
+    TEST_ASSERT_TRUE(pc_telemetry_cobs_decode(maximum_encoded, maximum_encoded_length, maximum_decoded,
+                                             sizeof(maximum_decoded), &decoded_length));
+    TEST_ASSERT_EQUAL_UINT32(sizeof(maximum_input), decoded_length);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(maximum_input, maximum_decoded, sizeof(maximum_input));
+
+    const uint8_t zero_code[] = {0x00};
+    const uint8_t truncated[] = {0x03, 0x11};
+    TEST_ASSERT_FALSE(pc_telemetry_cobs_decode(zero_code, sizeof(zero_code), decoded, sizeof(decoded), &decoded_length));
+    TEST_ASSERT_FALSE(pc_telemetry_cobs_decode(truncated, sizeof(truncated), decoded, sizeof(decoded), &decoded_length));
+}
+
+static void test_pc_telemetry_golden_frame_and_copy() {
+    uint8_t packet[BAYANG_PACKET_SIZE] = {0x86, 0x2A};
+    packet[14] = 0xB0;
+    PcTelemetrySample sample = {};
+    pc_telemetry_make_sample(&sample, packet, 0x0102030405060708ULL, 0xFFFE);
+    memset(packet, 0xCC, sizeof(packet));
+    TEST_ASSERT_EQUAL_HEX8(0x86, sample.packet[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xB0, sample.packet[14]);
+
+    uint8_t frame[PC_TELEMETRY_MAX_FRAME_SIZE] = {};
+    const size_t frame_length = pc_telemetry_encode_frame(sample, frame, sizeof(frame));
+    const uint8_t golden[] = {
+        0x03, 0x01, 0x01, 0x0E, 0x0F, 0xFF, 0xFE, 0x01, 0x02, 0x03, 0x04,
+        0x05, 0x06, 0x07, 0x08, 0x86, 0x2A, 0x01, 0x01, 0x01, 0x01, 0x01,
+        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x04, 0xB0, 0x9E, 0x78, 0x00,
+    };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(golden), frame_length);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(golden, frame, sizeof(golden));
+
+    PcTelemetrySample decoded = {};
+    TEST_ASSERT_TRUE(pc_telemetry_decode_frame(frame, frame_length, &decoded));
+    TEST_ASSERT_EQUAL_HEX16(0xFFFE, decoded.sequence);
+    TEST_ASSERT_EQUAL_HEX64(0x0102030405060708ULL, decoded.timestampUs);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(sample.packet, decoded.packet, BAYANG_PACKET_SIZE);
+
+    frame[15] ^= 0x01;
+    TEST_ASSERT_FALSE(pc_telemetry_decode_frame(frame, frame_length, &decoded));
+}
+
+static void test_pc_telemetry_original_wrap_and_resynchronization() {
+    uint8_t packet[BAYANG_PACKET_SIZE];
+    make_valid_telemetry(packet);
+    PcTelemetrySample sample = {};
+    pc_telemetry_make_sample(&sample, packet, 1234, 0xFFFF);
+    uint8_t frame[PC_TELEMETRY_MAX_FRAME_SIZE] = {};
+    size_t frame_length = pc_telemetry_encode_frame(sample, frame, sizeof(frame));
+    PcTelemetrySample decoded = {};
+    TEST_ASSERT_TRUE(pc_telemetry_decode_frame(frame, frame_length, &decoded));
+    TEST_ASSERT_EQUAL_HEX16(0xFFFF, decoded.sequence);
+    TEST_ASSERT_EQUAL_HEX8(0x85, decoded.packet[0]);
+
+    pc_telemetry_make_sample(&sample, packet, 1235, 0x0000);
+    frame_length = pc_telemetry_encode_frame(sample, frame, sizeof(frame));
+    TEST_ASSERT_TRUE(pc_telemetry_decode_frame(frame, frame_length, &decoded));
+    TEST_ASSERT_EQUAL_HEX16(0x0000, decoded.sequence);
+
+    uint8_t stream[PC_TELEMETRY_MAX_FRAME_SIZE + 3] = {0xA0, 0x55, 0x00};
+    memcpy(&stream[3], frame, frame_length);
+    TEST_ASSERT_FALSE(pc_telemetry_decode_frame(stream, 3, &decoded));
+    TEST_ASSERT_TRUE(pc_telemetry_decode_frame(&stream[3], frame_length, &decoded));
+
+    uint8_t record[PC_TELEMETRY_RECORD_SIZE] = {};
+    size_t record_length = 0;
+    TEST_ASSERT_TRUE(pc_telemetry_cobs_decode(frame, frame_length - 1, record, sizeof(record), &record_length));
+    record[0] = 2;
+    const uint16_t crc = pc_telemetry_crc16_ccitt_false(record, 29);
+    record[29] = static_cast<uint8_t>(crc >> 8);
+    record[30] = static_cast<uint8_t>(crc);
+    const size_t unknown_encoded_length =
+        pc_telemetry_cobs_encode(record, sizeof(record), frame, sizeof(frame) - 1);
+    frame[unknown_encoded_length] = 0;
+    TEST_ASSERT_FALSE(pc_telemetry_decode_frame(frame, unknown_encoded_length + 1, &decoded));
+
+    record[0] = PC_TELEMETRY_PROTOCOL_VERSION;
+    record[1] = 2;
+    const uint16_t type_crc = pc_telemetry_crc16_ccitt_false(record, 29);
+    record[29] = static_cast<uint8_t>(type_crc >> 8);
+    record[30] = static_cast<uint8_t>(type_crc);
+    const size_t unknown_type_length = pc_telemetry_cobs_encode(record, sizeof(record), frame, sizeof(frame) - 1);
+    frame[unknown_type_length] = 0;
+    TEST_ASSERT_FALSE(pc_telemetry_decode_frame(frame, unknown_type_length + 1, &decoded));
+}
+
+static void test_pc_telemetry_local_state_golden_frame() {
+    PcTelemetryLocalState state = {};
+    state.systemState = STATE_GAMEPAD_FAILSAFE;
+    state.statusFlags = 0x07FF;
+    state.buttons = 0x3FFF;
+    state.auxModes = 0x1F;
+    state.consecutiveTxFailures = 3;
+    state.nextHoppingChannelIndex = 2;
+    state.rollRaw = -1234;
+    state.pitchRaw = 2345;
+    state.yawRaw = -32768;
+    state.throttleRaw = 1023;
+    state.gamepadAgeMs = 42;
+    state.fcTelemetryAgeMs = PC_TELEMETRY_AGE_MAX;
+    state.txPackets = 0x01020304;
+    state.txFailures = 0x11121314;
+    state.telemetryAccepted = 0x21222324;
+    state.telemetryRejected = 0x31323334;
+    state.deadlineMisses = 0x41424344;
+    state.exportQueueDrops = 0x51525354;
+
+    uint8_t frame[PC_TELEMETRY_MAX_FRAME_SIZE] = {};
+    const size_t frame_length =
+        pc_telemetry_encode_local_state_frame(state, 0xFFFF, 0x0102030405060708ULL, frame, sizeof(frame));
+    const uint8_t golden[] = {
+        0x03, 0x01, 0x02, 0x19, 0x2C, 0xFF, 0xFF, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
+        0x07, 0x08, 0x05, 0x07, 0xFF, 0x3F, 0xFF, 0x1F, 0x03, 0x02, 0xFB, 0x2E, 0x09,
+        0x29, 0x80, 0x03, 0x03, 0xFF, 0x1E, 0x2A, 0xFF, 0xFE, 0x01, 0x02, 0x03, 0x04,
+        0x11, 0x12, 0x13, 0x14, 0x21, 0x22, 0x23, 0x24, 0x31, 0x32, 0x33, 0x34, 0x41,
+        0x42, 0x43, 0x44, 0x51, 0x52, 0x53, 0x54, 0xEA, 0x8F, 0x00,
+    };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(golden), frame_length);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(golden, frame, sizeof(golden));
+
+    memset(&state, 0, sizeof(state));
+    uint16_t sequence = 0;
+    uint64_t timestamp_us = 0;
+    TEST_ASSERT_TRUE(pc_telemetry_decode_local_state_frame(frame, frame_length, &state, &sequence, &timestamp_us));
+    TEST_ASSERT_EQUAL_HEX16(0xFFFF, sequence);
+    TEST_ASSERT_EQUAL_HEX64(0x0102030405060708ULL, timestamp_us);
+    TEST_ASSERT_EQUAL_UINT8(STATE_GAMEPAD_FAILSAFE, state.systemState);
+    TEST_ASSERT_EQUAL_HEX16(0x07FF, state.statusFlags);
+    TEST_ASSERT_EQUAL_HEX16(0x3FFF, state.buttons);
+    TEST_ASSERT_EQUAL_INT16(-1234, state.rollRaw);
+    TEST_ASSERT_EQUAL_INT16(2345, state.pitchRaw);
+    TEST_ASSERT_EQUAL_INT16(-32768, state.yawRaw);
+    TEST_ASSERT_EQUAL_UINT32(0x51525354, state.exportQueueDrops);
+
+    const size_t wrapped_length = pc_telemetry_encode_local_state_frame(state, 0, 9, frame, sizeof(frame));
+    TEST_ASSERT_TRUE(pc_telemetry_decode_local_state_frame(frame, wrapped_length, &state, &sequence, &timestamp_us));
+    TEST_ASSERT_EQUAL_HEX16(0, sequence);
+}
+
+static void test_pc_telemetry_local_state_derivation() {
+    PcTelemetryLocalStateInput input = {};
+    input.nowUs = 1000000;
+    input.systemState = STATE_ACTIVE;
+    input.controls.connected = true;
+    input.controls.lastUpdateUs = 900000;
+    input.controls.rollRaw = -100;
+    input.controls.pitchRaw = 200;
+    input.controls.yawRaw = -300;
+    input.controls.throttleRaw = 400;
+    input.controls.btnA = input.controls.btnB = input.controls.btnX = input.controls.btnY = true;
+    input.controls.btnLB = input.controls.btnRB = input.controls.btnL3 = input.controls.btnR3 = true;
+    input.controls.btnStart = input.controls.btnView = true;
+    input.controls.btnDPadUp = input.controls.btnDPadDown = true;
+    input.controls.btnDPadLeft = input.controls.btnDPadRight = true;
+    input.auxState.levelMode = input.auxState.raceMode = input.auxState.horizonMode = true;
+    input.auxState.pidProfile = input.auxState.leds = true;
+    input.radioInitialized = true;
+    input.consecutiveTxFailures = 2;
+    input.nextHoppingChannelIndex = 7;
+    input.telemetry.freshness = TelemetryFreshness::Fresh;
+    input.telemetry.ageUs = 200000;
+    input.txPackets = 10;
+    input.txFailures = 11;
+    input.telemetryAccepted = 12;
+    input.telemetryRejected = 13;
+    input.deadlineMisses = 14;
+    input.exportQueueDrops = 15;
+
+    PcTelemetryLocalState state = pc_telemetry_make_local_state(input);
+    TEST_ASSERT_EQUAL_UINT8(STATE_ACTIVE, state.systemState);
+    TEST_ASSERT_BITS_HIGH(PC_TELEMETRY_STATUS_GAMEPAD_CONNECTED | PC_TELEMETRY_STATUS_GAMEPAD_FRESH |
+                              PC_TELEMETRY_STATUS_CONTROL_ENABLED | PC_TELEMETRY_STATUS_RADIO_INITIALIZED |
+                              PC_TELEMETRY_STATUS_FC_TELEMETRY_SEEN | PC_TELEMETRY_STATUS_FC_TELEMETRY_FRESH,
+                          state.statusFlags);
+    TEST_ASSERT_BITS_LOW(PC_TELEMETRY_STATUS_SAFETY_LOCKED | PC_TELEMETRY_STATUS_BINDING |
+                             PC_TELEMETRY_STATUS_GAMEPAD_FAILSAFE | PC_TELEMETRY_STATUS_RADIO_ERROR |
+                             PC_TELEMETRY_STATUS_FC_TELEMETRY_STALE,
+                         state.statusFlags);
+    TEST_ASSERT_EQUAL_HEX16(0x3FFF, state.buttons);
+    TEST_ASSERT_EQUAL_HEX8(0x1F, state.auxModes);
+    TEST_ASSERT_EQUAL_UINT8(3, state.nextHoppingChannelIndex);
+    TEST_ASSERT_EQUAL_UINT16(100, state.gamepadAgeMs);
+    TEST_ASSERT_EQUAL_UINT16(200, state.fcTelemetryAgeMs);
+    TEST_ASSERT_EQUAL_UINT32(15, state.exportQueueDrops);
+
+    const SystemState states[] = {STATE_BOOT,          STATE_WAIT_GAMEPAD,    STATE_BINDING,   STATE_LOCKED,
+                                  STATE_ACTIVE,        STATE_GAMEPAD_FAILSAFE, STATE_RADIO_ERROR};
+    for (SystemState system_state : states) {
+        input.systemState = system_state;
+        state = pc_telemetry_make_local_state(input);
+        TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(system_state), state.systemState);
+        TEST_ASSERT_EQUAL(system_state == STATE_ACTIVE,
+                          (state.statusFlags & PC_TELEMETRY_STATUS_CONTROL_ENABLED) != 0);
+        TEST_ASSERT_EQUAL(system_state != STATE_ACTIVE,
+                          (state.statusFlags & PC_TELEMETRY_STATUS_SAFETY_LOCKED) != 0);
+        TEST_ASSERT_EQUAL(system_state == STATE_BINDING, (state.statusFlags & PC_TELEMETRY_STATUS_BINDING) != 0);
+        TEST_ASSERT_EQUAL(system_state == STATE_GAMEPAD_FAILSAFE,
+                          (state.statusFlags & PC_TELEMETRY_STATUS_GAMEPAD_FAILSAFE) != 0);
+        TEST_ASSERT_EQUAL(system_state == STATE_RADIO_ERROR,
+                          (state.statusFlags & PC_TELEMETRY_STATUS_RADIO_ERROR) != 0);
+    }
+}
+
+static void test_pc_telemetry_local_state_ages_and_schedule() {
+    PcTelemetryLocalStateInput input = {};
+    input.nowUs = 80000000;
+    input.systemState = STATE_LOCKED;
+    input.controls.connected = false;
+    input.controls.lastUpdateUs = 0;
+    input.telemetry.freshness = TelemetryFreshness::Never;
+    PcTelemetryLocalState state = pc_telemetry_make_local_state(input);
+    TEST_ASSERT_EQUAL_HEX16(PC_TELEMETRY_AGE_NEVER, state.gamepadAgeMs);
+    TEST_ASSERT_EQUAL_HEX16(PC_TELEMETRY_AGE_NEVER, state.fcTelemetryAgeMs);
+    TEST_ASSERT_BITS_LOW(PC_TELEMETRY_STATUS_GAMEPAD_CONNECTED | PC_TELEMETRY_STATUS_GAMEPAD_FRESH |
+                             PC_TELEMETRY_STATUS_FC_TELEMETRY_SEEN | PC_TELEMETRY_STATUS_FC_TELEMETRY_FRESH |
+                             PC_TELEMETRY_STATUS_FC_TELEMETRY_STALE,
+                         state.statusFlags);
+
+    input.controls.connected = true;
+    input.controls.lastUpdateUs = 1;
+    input.telemetry.freshness = TelemetryFreshness::Stale;
+    input.telemetry.ageUs = 70000000;
+    state = pc_telemetry_make_local_state(input);
+    TEST_ASSERT_EQUAL_HEX16(PC_TELEMETRY_AGE_MAX, state.gamepadAgeMs);
+    TEST_ASSERT_EQUAL_HEX16(PC_TELEMETRY_AGE_MAX, state.fcTelemetryAgeMs);
+    TEST_ASSERT_BITS_LOW(PC_TELEMETRY_STATUS_GAMEPAD_FRESH | PC_TELEMETRY_STATUS_FC_TELEMETRY_FRESH,
+                         state.statusFlags);
+    TEST_ASSERT_BITS_HIGH(PC_TELEMETRY_STATUS_GAMEPAD_CONNECTED | PC_TELEMETRY_STATUS_FC_TELEMETRY_SEEN |
+                              PC_TELEMETRY_STATUS_FC_TELEMETRY_STALE,
+                          state.statusFlags);
+
+    int64_t next_publish_us = 0;
+    TEST_ASSERT_TRUE(pc_telemetry_local_state_due(100, &next_publish_us));
+    TEST_ASSERT_EQUAL_INT64(50100, next_publish_us);
+    TEST_ASSERT_FALSE(pc_telemetry_local_state_due(50099, &next_publish_us));
+    TEST_ASSERT_TRUE(pc_telemetry_local_state_due(50100, &next_publish_us));
+    TEST_ASSERT_EQUAL_INT64(100100, next_publish_us);
+    TEST_ASSERT_TRUE(pc_telemetry_local_state_due(500000, &next_publish_us));
+    TEST_ASSERT_EQUAL_INT64(550000, next_publish_us);
+    TEST_ASSERT_FALSE(pc_telemetry_local_state_due(500001, &next_publish_us));
+}
+
 static void test_telemetry_never_state() {
     telemetry_init();
     TEST_ASSERT_EQUAL(static_cast<int>(TelemetryFreshness::Never),
@@ -596,6 +861,12 @@ int main(int, char**) {
     RUN_TEST(test_extended_power_and_system_pages);
     RUN_TEST(test_extended_flight_modes);
     RUN_TEST(test_extended_sequence_checksum_and_protocol_transitions);
+    RUN_TEST(test_pc_telemetry_crc_and_cobs);
+    RUN_TEST(test_pc_telemetry_golden_frame_and_copy);
+    RUN_TEST(test_pc_telemetry_original_wrap_and_resynchronization);
+    RUN_TEST(test_pc_telemetry_local_state_golden_frame);
+    RUN_TEST(test_pc_telemetry_local_state_derivation);
+    RUN_TEST(test_pc_telemetry_local_state_ages_and_schedule);
     RUN_TEST(test_telemetry_never_state);
     RUN_TEST(test_failsafe_transitions);
     RUN_TEST(test_binding_and_radio_error_latch);

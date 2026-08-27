@@ -27,6 +27,7 @@ The current transmitter configuration enables telemetry and disables analog AUX 
 | [Gamepad controls](docs/controls.md) | Sticks, buttons, channels, and flight modes |
 | [How the transmitter works](docs/how-it-works.md) | TX states, task design, failsafe, radio, and telemetry |
 | [Extended telemetry](docs/extended-telemetry.md) | Rotating OSD fields, packet layout, and FC configuration |
+| [PC telemetry bridge](docs/pc-telemetry-bridge.md) | Binary USB framing for FC telemetry and ESP32 transmitter state |
 | [Build and test](docs/development.md) | Dependencies, native tests, and the ESP32 build |
 
 ## Quick start
