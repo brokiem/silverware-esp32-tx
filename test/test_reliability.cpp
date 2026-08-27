@@ -254,6 +254,27 @@ static void make_valid_telemetry(uint8_t* packet) {
     set_checksum(packet);
 }
 
+static void telemetry_write_bits(uint8_t* packet, uint8_t* offset, uint32_t value, uint8_t count) {
+    for (int bit = count - 1; bit >= 0; --bit) {
+        const uint8_t byte_index = 2 + (*offset >> 3);
+        const uint8_t byte_bit = 7 - (*offset & 7);
+        if (value & (1UL << bit))
+            packet[byte_index] |= 1U << byte_bit;
+        ++*offset;
+    }
+}
+
+static uint32_t signed_field(int32_t value, uint8_t bits) {
+    return static_cast<uint32_t>(value) & ((1UL << bits) - 1UL);
+}
+
+static void make_extended_telemetry(uint8_t* packet, uint8_t page, uint8_t sequence,
+                                    bool armed = false, bool failsafe = false) {
+    memset(packet, 0, BAYANG_PACKET_SIZE);
+    packet[0] = 0x86;
+    packet[1] = (page << 6) | (armed ? 1U << 5 : 0) | (failsafe ? 1U << 4 : 0) | (sequence & 0x0F);
+}
+
 static void test_telemetry_validation_and_freshness() {
     telemetry_init();
     uint8_t packet[BAYANG_PACKET_SIZE];
@@ -265,6 +286,7 @@ static void test_telemetry_validation_and_freshness() {
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 4.04f, snapshot.data.batteryCompensatedV);
     TEST_ASSERT_EQUAL_UINT16(144, snapshot.data.receiverPacketsPerSecond);
     TEST_ASSERT_EQUAL_UINT16(0x123, snapshot.data.pidI);
+    TEST_ASSERT_EQUAL(static_cast<int>(TelemetryProtocol::Original), static_cast<int>(snapshot.data.protocol));
 
     TEST_ASSERT_EQUAL(static_cast<int>(TelemetryFreshness::Fresh),
                       static_cast<int>(telemetry_get_snapshot(1500000).freshness));
@@ -282,6 +304,201 @@ static void test_telemetry_validation_and_freshness() {
     packet[4] ^= 0x02;
     TEST_ASSERT_FALSE(telemetry_parse(packet, 3000000));
     TEST_ASSERT_EQUAL_INT64(2000000, telemetry_get_snapshot(3000000).ageUs);
+}
+
+static void test_extended_control_and_flight_pages() {
+    telemetry_init();
+    uint8_t packet[BAYANG_PACKET_SIZE];
+
+    make_extended_telemetry(packet, 0, 0, true, false);
+    uint8_t offset = 0;
+    telemetry_write_bits(packet, &offset, signed_field(-512, 10), 10);
+    telemetry_write_bits(packet, &offset, 0, 10);
+    telemetry_write_bits(packet, &offset, 511, 10);
+    telemetry_write_bits(packet, &offset, signed_field(-100, 10), 10);
+    telemetry_write_bits(packet, &offset, 100, 10);
+    telemetry_write_bits(packet, &offset, 250, 10);
+    telemetry_write_bits(packet, &offset, 63, 6);
+    telemetry_write_bits(packet, &offset, 32, 6);
+    telemetry_write_bits(packet, &offset, 0, 6);
+    telemetry_write_bits(packet, &offset, 21, 6);
+    telemetry_write_bits(packet, &offset, 42, 6);
+    telemetry_write_bits(packet, &offset, 63, 6);
+    set_checksum(packet);
+    TEST_ASSERT_TRUE(telemetry_parse(packet, 1000));
+
+    TelemetrySnapshot snapshot = telemetry_get_snapshot(1000);
+    TEST_ASSERT_EQUAL(static_cast<int>(TelemetryProtocol::ExtendedV1), static_cast<int>(snapshot.data.protocol));
+    TEST_ASSERT_EQUAL_UINT16(TELEMETRY_EXTENDED_PAGE_CONTROL, snapshot.data.extendedPagesSeen);
+    TEST_ASSERT_TRUE(snapshot.data.armed);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, -2048.0f, snapshot.data.gyroRollDps);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 2044.0f, snapshot.data.gyroYawDps);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, -400.0f, snapshot.data.setpointRollDps);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 100.0f, snapshot.data.commandedThrottlePercent);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 50.79f, snapshot.data.appliedThrottlePercent);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 33.33f, snapshot.data.motorOutputPercent[1]);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 100.0f, snapshot.data.motorOutputPercent[3]);
+
+    make_extended_telemetry(packet, 1, 1, true, true);
+    offset = 0;
+    telemetry_write_bits(packet, &offset, 1234, 12);
+    telemetry_write_bits(packet, &offset, signed_field(-567, 12), 12);
+    telemetry_write_bits(packet, &offset, 1800, 12);
+    telemetry_write_bits(packet, &offset, 256, 12);
+    telemetry_write_bits(packet, &offset, signed_field(-512, 12), 12);
+    telemetry_write_bits(packet, &offset, 2047, 12);
+    telemetry_write_bits(packet, &offset, 4321, 16);
+    telemetry_write_bits(packet, &offset, 0x7F, 8);
+    set_checksum(packet);
+    TEST_ASSERT_TRUE(telemetry_parse(packet, 2000));
+
+    snapshot = telemetry_get_snapshot(2000);
+    TEST_ASSERT_TRUE(snapshot.data.armed);
+    TEST_ASSERT_TRUE(snapshot.data.failsafe);
+    TEST_ASSERT_TRUE(snapshot.data.onGround);
+    TEST_ASSERT_TRUE(snapshot.data.idleUp);
+    TEST_ASSERT_TRUE(snapshot.data.pidProfile);
+    TEST_ASSERT_EQUAL(static_cast<int>(FlightMode::RaceHorizon), static_cast<int>(snapshot.data.flightMode));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 123.4f, snapshot.data.rollDeg);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, -56.7f, snapshot.data.pitchDeg);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 180.0f, snapshot.data.relativeYawDeg);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, snapshot.data.accelXG);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, -2.0f, snapshot.data.accelYG);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 7.996f, snapshot.data.accelZG);
+    TEST_ASSERT_EQUAL_UINT16(4321, snapshot.data.flightTimeSeconds);
+    TEST_ASSERT_EQUAL_UINT16(TELEMETRY_EXTENDED_PAGE_CONTROL | TELEMETRY_EXTENDED_PAGE_FLIGHT,
+                             snapshot.data.extendedPagesSeen);
+}
+
+static void test_extended_power_and_system_pages() {
+    telemetry_init();
+    uint8_t packet[BAYANG_PACKET_SIZE];
+
+    make_extended_telemetry(packet, 2, 0);
+    uint8_t offset = 0;
+    telemetry_write_bits(packet, &offset, 3712, 16);
+    telemetry_write_bits(packet, &offset, 3890, 16);
+    telemetry_write_bits(packet, &offset, 198, 8);
+    telemetry_write_bits(packet, &offset, 2, 8);
+    telemetry_write_bits(packet, &offset, 99, 8);
+    telemetry_write_bits(packet, &offset, 1, 8);
+    telemetry_write_bits(packet, &offset, 350, 16);
+    telemetry_write_bits(packet, &offset, 52, 8);
+    telemetry_write_bits(packet, &offset, 7, 8);
+    set_checksum(packet);
+    TEST_ASSERT_TRUE(telemetry_parse(packet, 1000));
+
+    TelemetrySnapshot snapshot = telemetry_get_snapshot(1000);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 3.712f, snapshot.data.batteryRawV);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 3.890f, snapshot.data.batteryCompensatedV);
+    TEST_ASSERT_EQUAL_UINT16(198, snapshot.data.receiverPacketsPerSecond);
+    TEST_ASSERT_EQUAL_UINT8(2, snapshot.data.packetsLostPerSecond);
+    TEST_ASSERT_EQUAL_UINT8(99, snapshot.data.linkQualityPercent);
+    TEST_ASSERT_TRUE(snapshot.data.lowVoltage);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 35.0f, snapshot.data.maximumRxGapMs);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 5.2f, snapshot.data.currentRxGapMs);
+    TEST_ASSERT_EQUAL_UINT8(7, snapshot.data.failsafeCount);
+
+    make_extended_telemetry(packet, 3, 1);
+    offset = 0;
+    telemetry_write_bits(packet, &offset, 0, 1);
+    telemetry_write_bits(packet, &offset, 1001, 16);
+    telemetry_write_bits(packet, &offset, 1150, 16);
+    telemetry_write_bits(packet, &offset, 3, 16);
+    telemetry_write_bits(packet, &offset, signed_field(-321, 16), 16);
+    telemetry_write_bits(packet, &offset, 0x68, 8);
+    telemetry_write_bits(packet, &offset, 73, 8);
+    telemetry_write_bits(packet, &offset, 12345, 15);
+    set_checksum(packet);
+    TEST_ASSERT_TRUE(telemetry_parse(packet, 2000));
+
+    make_extended_telemetry(packet, 3, 2);
+    offset = 0;
+    telemetry_write_bits(packet, &offset, 1, 1);
+    telemetry_write_bits(packet, &offset, 1234567, 32);
+    telemetry_write_bits(packet, &offset, 2345, 32);
+    telemetry_write_bits(packet, &offset, 7654321, 31);
+    set_checksum(packet);
+    TEST_ASSERT_TRUE(telemetry_parse(packet, 3000));
+
+    snapshot = telemetry_get_snapshot(3000);
+    TEST_ASSERT_EQUAL_UINT8(TELEMETRY_SYSTEM_SUBPAGE_HEALTH | TELEMETRY_SYSTEM_SUBPAGE_COUNTERS,
+                            snapshot.data.systemSubpagesSeen);
+    TEST_ASSERT_EQUAL_UINT16(1001, snapshot.data.loopTimeAverageUs);
+    TEST_ASSERT_EQUAL_UINT16(1150, snapshot.data.loopTimeMaximumUs);
+    TEST_ASSERT_EQUAL_UINT16(3, snapshot.data.loopOverrunCount);
+    TEST_ASSERT_EQUAL_INT16(-321, snapshot.data.imuTemperatureRaw);
+    TEST_ASSERT_EQUAL_UINT8(0x68, snapshot.data.imuType);
+    TEST_ASSERT_EQUAL_UINT8(73, snapshot.data.cpuLoadPercent);
+    TEST_ASSERT_EQUAL_UINT32(1234567, snapshot.data.receiverPacketTotal);
+    TEST_ASSERT_EQUAL_UINT32(2345, snapshot.data.estimatedLostPacketTotal);
+    TEST_ASSERT_EQUAL_UINT32(7654321, snapshot.data.telemetryTxCount);
+}
+
+static void test_extended_flight_modes() {
+    struct ModeCase {
+        uint16_t flags;
+        FlightMode expected;
+    };
+    const ModeCase cases[] = {
+        {0, FlightMode::Acro},
+        {1U << 3, FlightMode::Level},
+        {(1U << 3) | (1U << 4), FlightMode::Race},
+        {(1U << 3) | (1U << 5), FlightMode::Horizon},
+        {(1U << 3) | (1U << 4) | (1U << 5), FlightMode::RaceHorizon},
+    };
+
+    telemetry_init();
+    for (const ModeCase& mode_case : cases) {
+        uint8_t packet[BAYANG_PACKET_SIZE];
+        make_extended_telemetry(packet, 1, 0);
+        uint8_t offset = 0;
+        for (int field = 0; field < 6; ++field)
+            telemetry_write_bits(packet, &offset, 0, 12);
+        telemetry_write_bits(packet, &offset, 0, 16);
+        telemetry_write_bits(packet, &offset, mode_case.flags, 8);
+        set_checksum(packet);
+        TEST_ASSERT_TRUE(telemetry_parse(packet, 1000));
+        TEST_ASSERT_EQUAL(static_cast<int>(mode_case.expected),
+                          static_cast<int>(telemetry_get_snapshot(1000).data.flightMode));
+    }
+}
+
+static void test_extended_sequence_checksum_and_protocol_transitions() {
+    telemetry_init();
+    uint8_t packet[BAYANG_PACKET_SIZE];
+
+    make_extended_telemetry(packet, 0, 0, true);
+    set_checksum(packet);
+    TEST_ASSERT_TRUE(telemetry_parse(packet, 1000));
+
+    packet[2] ^= 0x01;
+    TEST_ASSERT_FALSE(telemetry_parse(packet, 1500));
+    TelemetrySnapshot snapshot = telemetry_get_snapshot(1500);
+    TEST_ASSERT_EQUAL_INT64(500, snapshot.ageUs);
+
+    make_extended_telemetry(packet, 0, 2, true);
+    set_checksum(packet);
+    TEST_ASSERT_TRUE(telemetry_parse(packet, 2000));
+    snapshot = telemetry_get_snapshot(2000);
+    TEST_ASSERT_EQUAL_UINT32(1, snapshot.data.telemetryPacketsLost);
+
+    make_valid_telemetry(packet);
+    TEST_ASSERT_TRUE(telemetry_parse(packet, 3000));
+    snapshot = telemetry_get_snapshot(3000);
+    TEST_ASSERT_EQUAL(static_cast<int>(TelemetryProtocol::Original), static_cast<int>(snapshot.data.protocol));
+    TEST_ASSERT_EQUAL_UINT16(0, snapshot.data.extendedPagesSeen);
+    TEST_ASSERT_EQUAL(static_cast<int>(FlightMode::Unknown), static_cast<int>(snapshot.data.flightMode));
+    TEST_ASSERT_FALSE(snapshot.data.armed);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, snapshot.data.commandedThrottlePercent);
+    TEST_ASSERT_EQUAL_UINT16(0x123, snapshot.data.pidI);
+
+    make_extended_telemetry(packet, 2, 0);
+    set_checksum(packet);
+    TEST_ASSERT_TRUE(telemetry_parse(packet, 4000));
+    snapshot = telemetry_get_snapshot(4000);
+    TEST_ASSERT_EQUAL_UINT16(TELEMETRY_EXTENDED_PAGE_POWER, snapshot.data.extendedPagesSeen);
+    TEST_ASSERT_EQUAL(static_cast<int>(FlightMode::Unknown), static_cast<int>(snapshot.data.flightMode));
 }
 
 static void test_telemetry_never_state() {
@@ -375,6 +592,10 @@ int main(int, char**) {
     RUN_TEST(test_nfe_silverware_autobind_multi_profile);
     RUN_TEST(test_radio_length_guards_and_status_decode);
     RUN_TEST(test_telemetry_validation_and_freshness);
+    RUN_TEST(test_extended_control_and_flight_pages);
+    RUN_TEST(test_extended_power_and_system_pages);
+    RUN_TEST(test_extended_flight_modes);
+    RUN_TEST(test_extended_sequence_checksum_and_protocol_transitions);
     RUN_TEST(test_telemetry_never_state);
     RUN_TEST(test_failsafe_transitions);
     RUN_TEST(test_binding_and_radio_error_latch);

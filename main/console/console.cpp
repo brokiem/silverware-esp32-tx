@@ -31,6 +31,23 @@ const char* state_name(SystemState state) {
     }
 }
 
+const char* flight_mode_name(FlightMode mode) {
+    switch (mode) {
+        case FlightMode::Acro:
+            return "ACRO";
+        case FlightMode::Level:
+            return "LEVEL";
+        case FlightMode::Race:
+            return "RACE";
+        case FlightMode::Horizon:
+            return "HORIZON";
+        case FlightMode::RaceHorizon:
+            return "RACE_HORIZON";
+        default:
+            return "UNKNOWN";
+    }
+}
+
 void print_event(const ConsoleEvent& event) {
     switch (event.type) {
         case ConsoleEventType::StateChanged:
@@ -71,6 +88,20 @@ void print_status(const ConsoleStatus& status) {
                       status.telemetry.freshness == TelemetryFreshness::Stale ? " STALE" : "", age_ms,
                       status.telemetry.data.batteryCompensatedV,
                       static_cast<unsigned>(status.telemetry.data.receiverPacketsPerSecond));
+        if (status.telemetry.data.protocol == TelemetryProtocol::ExtendedV1) {
+            Serial.print(" EXT");
+            if (status.telemetry.data.extendedPagesSeen & TELEMETRY_EXTENDED_PAGE_FLIGHT) {
+                Serial.printf(" %s/%s flight=%us", status.telemetry.data.armed ? "ARMED" : "DISARMED",
+                              flight_mode_name(status.telemetry.data.flightMode),
+                              static_cast<unsigned>(status.telemetry.data.flightTimeSeconds));
+                Serial.printf(" roll=%.1f pitch=%.1f yaw=%.1f", status.telemetry.data.rollDeg,
+                              status.telemetry.data.pitchDeg, status.telemetry.data.relativeYawDeg);
+            }
+            if (status.telemetry.data.extendedPagesSeen & TELEMETRY_EXTENDED_PAGE_CONTROL)
+                Serial.printf(" thr=%.1f%%", status.telemetry.data.commandedThrottlePercent);
+        } else {
+            Serial.print(" ORIGINAL");
+        }
     }
 
     Serial.printf(" | RF: tx=%lu err=%lu telem=%lu/%lu miss=%lu\n", static_cast<unsigned long>(status.radio.txPackets),

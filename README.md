@@ -9,7 +9,7 @@ The transmitter sends Bayang control packets every 5 ms. It also receives and ch
 
 ## Compatible flight controller
 
-This transmitter matches the [`rajawali` branch of NFE_Silverware](https://github.com/brokiem/NFE_Silverware/tree/rajawali). The flight controller must use these options:
+This transmitter matches the [`rajawali` branch of my NFE_Silverware fork](https://github.com/brokiem/NFE_Silverware/tree/rajawali). The flight controller must use these options:
 
 ```c
 #define RX_BAYANG_PROTOCOL_TELEMETRY_AUTOBIND
@@ -26,6 +26,7 @@ The current transmitter configuration enables telemetry and disables analog AUX 
 | [Binding](docs/binding.md) | New binding, saved binding, and the FC save gesture |
 | [Gamepad controls](docs/controls.md) | Sticks, buttons, channels, and flight modes |
 | [How the transmitter works](docs/how-it-works.md) | TX states, task design, failsafe, radio, and telemetry |
+| [Extended telemetry](docs/extended-telemetry.md) | Rotating OSD fields, packet layout, and FC configuration |
 | [Build and test](docs/development.md) | Dependencies, native tests, and the ESP32 build |
 
 ## Quick start

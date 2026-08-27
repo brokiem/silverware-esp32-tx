@@ -111,7 +111,7 @@ void bayang_build_data_packet(uint8_t* packet, const struct BayangControlState* 
 }
 
 bool bayang_check_telemetry(const uint8_t* packet) {
-    if (!packet || packet[0] != 0x85)
+    if (!packet || (packet[0] != 0x85 && packet[0] != 0x86))
         return false;
 
     // Original NFE Silverware Bayang telemetry has no RF CRC. Its protocol

@@ -11,6 +11,7 @@
 
 // Matches the FC configuration:
 //   #define RX_BAYANG_PROTOCOL_TELEMETRY_AUTOBIND
+//   #define RX_BAYANG_EXTENDED_TELEMETRY  // Optional; detected automatically by this TX.
 //   #define USE_MULTI
 #define BAYANG_ENABLE_TELEMETRY 1
 #define BAYANG_ENABLE_ANALOG_AUX 0
