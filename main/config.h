@@ -7,8 +7,7 @@
 #define PIN_NRF_MISO 19
 #define PIN_NRF_CSN 5
 #define PIN_NRF_CE 17
-// IRQ is optional and not used in this implementation (polling is used)
-#define PIN_NRF_IRQ 27
+#define PIN_NRF_IRQ 26
 
 // Matches the FC configuration:
 //   #define RX_BAYANG_PROTOCOL_TELEMETRY_AUTOBIND
@@ -45,9 +44,11 @@ static_assert(THROTTLE_SOURCE == ThrottleSource::Trigger || THROTTLE_SOURCE == T
 #define CONTROL_LOOP_PERIOD_MS 5
 #define ARM_THROTTLE_MAX 10
 #define BIND_DURATION_US 2000000
-#define TELEMETRY_RX_WINDOW_US 2500
+#define TELEMETRY_RX_DEADLINE_US 4400
 
 static_assert(CONTROL_LOOP_PERIOD_MS == 5, "NFE Silverware telemetry expects a 5 ms packet period");
+static_assert(TELEMETRY_RX_DEADLINE_US < CONTROL_LOOP_PERIOD_MS * 1000,
+              "Telemetry RX deadline must fit inside the 5 ms control frame");
 
 // Debug configuration
 #define STATUS_PRINT_HZ 5

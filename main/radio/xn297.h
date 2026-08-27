@@ -15,6 +15,7 @@ bool xn297_write_payload(const uint8_t* msg, uint8_t len);
 bool xn297_read_payload(uint8_t* msg, uint8_t len);
 void xn297_set_channel(uint8_t channel);
 bool xn297_is_rx_ready();
+bool xn297_irq_asserted();
 Xn297TxStatus xn297_get_tx_status();
 void xn297_set_tx_mode();
 void xn297_set_rx_mode();

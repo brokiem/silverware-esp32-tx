@@ -100,7 +100,7 @@ bool xn297_read_payload(uint8_t* msg, uint8_t len) {
         msg[i] = bit_reverse(b_in);
     }
 
-    // Telemetry from Silverware does not check the XN297 CRC
+    // Original NFE Silverware telemetry is sent without an XN297 CRC.
     return true;
 }
 
@@ -110,6 +110,10 @@ void xn297_set_channel(uint8_t channel) {
 
 bool xn297_is_rx_ready() {
     return (nrf24_get_status() & NRF24_RX_DR) != 0;
+}
+
+bool xn297_irq_asserted() {
+    return nrf24_irq_asserted();
 }
 
 Xn297TxStatus xn297_get_tx_status() {

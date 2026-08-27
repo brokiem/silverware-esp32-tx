@@ -50,3 +50,4 @@ void nrf24_set_standby();
 void nrf24_set_channel(uint8_t channel);
 void nrf24_clear_irq_flags();
 uint8_t nrf24_get_status();
+bool nrf24_irq_asserted();

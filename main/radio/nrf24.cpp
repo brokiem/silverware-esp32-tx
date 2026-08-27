@@ -15,6 +15,7 @@ bool nrf24_init() {
     digitalWrite(PIN_NRF_CE, LOW);
     pinMode(PIN_NRF_CSN, OUTPUT);
     digitalWrite(PIN_NRF_CSN, HIGH);
+    pinMode(PIN_NRF_IRQ, INPUT_PULLUP);
 
     // Default config matching Multiprotocol XN297_EMU setup for NRF24
     nrf24_set_standby();
@@ -143,7 +144,12 @@ void nrf24_set_tx_mode() {
 void nrf24_set_rx_mode() {
     digitalWrite(PIN_NRF_CE, LOW);
     nrf24_flush_rx();
-    nrf24_write_reg(NRF24_REG_CONFIG, 0x03);  // PWR_UP | RX (No CRC)
+
+    // NFE Silverware Bayang telemetry is transmitted without an XN297 CRC.
+    // The nRF24 hardware CRC must therefore remain disabled or valid
+    // Silverware telemetry will be discarded by the radio before the ESP32
+    // can inspect the Bayang checksum.
+    nrf24_write_reg(NRF24_REG_CONFIG, 0x03);  // PWR_UP | PRIM_RX, HW CRC disabled
     digitalWrite(PIN_NRF_CE, HIGH);
 }
 
@@ -158,6 +164,10 @@ void nrf24_set_channel(uint8_t channel) {
 
 void nrf24_clear_irq_flags() {
     nrf24_write_reg(NRF24_REG_STATUS, NRF24_RX_DR | NRF24_TX_DS | NRF24_MAX_RT);
+}
+
+bool nrf24_irq_asserted() {
+    return digitalRead(PIN_NRF_IRQ) == LOW;
 }
 
 uint8_t nrf24_get_status() {

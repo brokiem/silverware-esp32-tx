@@ -111,7 +111,13 @@ void bayang_build_data_packet(uint8_t* packet, const struct BayangControlState* 
 }
 
 bool bayang_check_telemetry(const uint8_t* packet) {
-    if (packet[0] != 0x85)
+    if (!packet || packet[0] != 0x85)
         return false;
-    return calculate_checksum(packet) == packet[14];
+
+    // Original NFE Silverware Bayang telemetry has no RF CRC. Its protocol
+    // integrity check is the 8-bit additive checksum in byte 14.
+    if (calculate_checksum(packet) != packet[14])
+        return false;
+
+    return true;
 }

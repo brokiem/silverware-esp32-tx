@@ -98,6 +98,14 @@ void control_radio_task(void*) {
         publish_state_change(previous_state, STATE_RADIO_ERROR);
         previous_state = STATE_RADIO_ERROR;
     }
+#if BAYANG_ENABLE_TELEMETRY
+    else if (!xn297_set_rx_address(tx_id, BAYANG_PACKET_SIZE)) {
+        failsafe_report_radio_error();
+        console_publish_event({ConsoleEventType::RadioInitFailed, previous_state, STATE_RADIO_ERROR});
+        publish_state_change(previous_state, STATE_RADIO_ERROR);
+        previous_state = STATE_RADIO_ERROR;
+    }
+#endif
 
     for (;;) {
         const int64_t cycle_start_us = esp_timer_get_time();
@@ -155,23 +163,28 @@ void control_radio_task(void*) {
                 consecutive_tx_failures = 0;
 
 #if BAYANG_ENABLE_TELEMETRY
-                if (!binding_packet && xn297_set_rx_address(tx_id, BAYANG_PACKET_SIZE)) {
+                if (!binding_packet) {
+                    // Silverware answers on the same hopping channel as the
+                    // control packet. Switch to RX immediately after TX_DS and
+                    // keep listening until late in the 5 ms frame, matching the
+                    // timing used by established Bayang telemetry transmitters.
                     xn297_set_rx_mode();
-                    const int64_t receive_start_us = esp_timer_get_time();
-                    while ((esp_timer_get_time() - receive_start_us) < TELEMETRY_RX_WINDOW_US) {
-                        if (xn297_is_rx_ready()) {
+                    const int64_t receive_deadline_us = cycle_start_us + TELEMETRY_RX_DEADLINE_US;
+
+                    while (esp_timer_get_time() < receive_deadline_us) {
+                        // IRQ goes low for RX_DR. Checking the pin avoids
+                        // hammering STATUS over SPI throughout every RX window.
+                        if (xn297_irq_asserted() && xn297_is_rx_ready()) {
                             uint8_t received[BAYANG_PACKET_SIZE] = {};
-                            if (xn297_read_payload(received, sizeof(received))) {
-                                if (telemetry_parse(received, esp_timer_get_time()))
-                                    ++stats.telemetryAccepted;
-                                else
-                                    ++stats.telemetryRejected;
+                            if (xn297_read_payload(received, sizeof(received)) &&
+                                telemetry_parse(received, esp_timer_get_time())) {
+                                ++stats.telemetryAccepted;
                             } else {
                                 ++stats.telemetryRejected;
                             }
                             break;
                         }
-                        delayMicroseconds(20);
+                        delayMicroseconds(10);
                     }
                 }
 #endif
