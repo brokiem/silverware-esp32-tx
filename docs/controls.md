@@ -34,7 +34,9 @@ Start only arms from `LOCKED` when throttle is zero. Press Start again to disarm
 
 B causes a local disarm. The TX sends a zero-throttle packet in the same RF cycle.
 
-The TX clears all mode toggles after a lock, disconnect, or failsafe event.
+The TX keeps the selected flight mode, PID profile, and FC LED setting while
+locked. CH5 and throttle remain off, so preserving these settings cannot arm the
+aircraft. A reboot resets the selections to their defaults.
 
 ## Rajawali flight modes
 

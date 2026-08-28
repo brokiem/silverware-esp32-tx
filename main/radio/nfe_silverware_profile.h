@@ -24,4 +24,6 @@ void nfe_silverware_update_aux(NfeSilverwareAuxState* state,
                                bool button_rb,
                                bool button_lb);
 void nfe_silverware_apply_multi_aux(BayangControlState* controls, bool active, const NfeSilverwareAuxState& state);
-BayangControlState nfe_silverware_make_locked_control(bool gesture_enabled, uint16_t gesture_pitch);
+BayangControlState nfe_silverware_make_locked_control(bool gesture_enabled,
+                                                      uint16_t gesture_pitch,
+                                                      const NfeSilverwareAuxState& state);

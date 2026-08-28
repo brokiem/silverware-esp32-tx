@@ -234,20 +234,20 @@ static void test_nfe_silverware_autobind_multi_profile() {
     nfe_silverware_update_aux(&aux, true, true, false, false, false, false);
     TEST_ASSERT_FALSE(aux.levelMode);
 
-    // Disarming clears every FC mode and CH5.
+    // Disarming preserves FC configuration channels while clearing CH5.
     nfe_silverware_update_aux(&aux, false, false, false, false, false, false);
     controls = {};
     nfe_silverware_apply_multi_aux(&controls, false, aux);
     bayang_build_data_packet(packet, &controls);
-    TEST_ASSERT_EQUAL_HEX8(0, packet[2]);
-    TEST_ASSERT_EQUAL_HEX8(0, packet[3]);
+    TEST_ASSERT_EQUAL_HEX8(BAYANG_FLAG_PICTURE | BAYANG_FLAG_VIDEO | BAYANG_FLAG_HEADLESS, packet[2]);
+    TEST_ASSERT_EQUAL_HEX8(BAYANG_FLAG_INVERTED, packet[3]);
 
-    // Locked gesture passthrough changes pitch only and cannot arm or add throttle.
-    controls = nfe_silverware_make_locked_control(true, 1023);
+    // Locked control preserves configuration and pitch gestures, but cannot arm or add throttle.
+    controls = nfe_silverware_make_locked_control(true, 1023, aux);
     bayang_build_data_packet(packet, &controls);
-    TEST_ASSERT_EQUAL_HEX8(0, packet[2]);
-    TEST_ASSERT_EQUAL_HEX8(0, packet[3]);
-    TEST_ASSERT_EQUAL_HEX8(0xFF, packet[6]);
+    TEST_ASSERT_EQUAL_HEX8(BAYANG_FLAG_PICTURE | BAYANG_FLAG_VIDEO | BAYANG_FLAG_HEADLESS, packet[2]);
+    TEST_ASSERT_EQUAL_HEX8(BAYANG_FLAG_INVERTED, packet[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x7F, packet[6]);
     TEST_ASSERT_EQUAL_HEX8(0xFF, packet[7]);
     TEST_ASSERT_EQUAL_HEX8(0x7C, packet[8]);
     TEST_ASSERT_EQUAL_HEX8(0x00, packet[9]);

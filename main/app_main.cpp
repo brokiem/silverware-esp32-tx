@@ -48,11 +48,11 @@ BayangControlState neutral_control() {
     return state;
 }
 
-BayangControlState locked_control(const ControlState& controls) {
+BayangControlState locked_control(const ControlState& controls, const NfeSilverwareAuxState& aux_state) {
     // L3 deliberately enables pitch-only FC gestures while throttle and CH5 remain off.
     const uint16_t pitch =
         gamepad_get_bayang_channel(controls.pitchRaw, false, PITCH_REVERSED, STICK_DEADBAND, PITCH_EXPO);
-    return nfe_silverware_make_locked_control(controls.connected && controls.btnL3, pitch);
+    return nfe_silverware_make_locked_control(controls.connected && controls.btnL3, pitch, aux_state);
 }
 
 BayangControlState active_control(const ControlState& controls, const NfeSilverwareAuxState& aux_state) {
@@ -156,7 +156,7 @@ void control_radio_task(void*) {
         } else if (state != STATE_RADIO_ERROR) {
             const BayangControlState bayang =
                 state == STATE_ACTIVE ? active_control(controls, aux_state)
-                                      : (state == STATE_LOCKED ? locked_control(controls) : neutral_control());
+                                      : (state == STATE_LOCKED ? locked_control(controls, aux_state) : neutral_control());
             bayang_build_data_packet(packet, &bayang);
             xn297_set_tx_address(tx_id);
             xn297_set_channel(hopping_channels[channel_index]);
