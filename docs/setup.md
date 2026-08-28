@@ -8,6 +8,7 @@
 - NRF24L01+ radio
 - Xbox-compatible gamepad supported by Bluepad32
 - Silverware flight controller with a Bayang receiver
+- Active-high three-pin buzzer module
 
 ## NRF24L01+ wiring
 
@@ -20,8 +21,30 @@ The transmitter uses the ESP32 VSPI bus.
 | SCK | GPIO 18 |
 | CSN | GPIO 5 |
 | CE | GPIO 17 |
+| IRQ | GPIO 26 |
 
-The firmware does not use the NRF24 IRQ signal.
+## Local feedback wiring
+
+Connect the three-pin buzzer module as follows:
+
+| Buzzer pin | Connection |
+| --- | --- |
+| Signal, control, or `S` | GPIO 27 (`D27`) |
+| Power, `VCC`, or `+` | The module's rated supply |
+| Ground, `GND`, or `-` | ESP32 ground |
+
+GPIO 27 only drives the control input. Do not use it to power the buzzer. The default configuration expects an active-high control input.
+
+The firmware also uses the ESP32 DevKit onboard LED on GPIO 2. Both pin numbers and active levels can be changed in `main/config.h` for a different board.
+
+| TX state | Onboard LED | Buzzer |
+| --- | --- | --- |
+| Waiting for gamepad | Brief pulse once per second | One short transition chirp |
+| Locked | Slow blink | Lock/connect chirp |
+| Binding | Fast blink | Two chirps when binding starts; three when it ends |
+| Active | Solid | One arm tone |
+| Gamepad failsafe | Fast blink | Repeating triple alarm |
+| Radio error | Repeating double flash | Repeating double alarm |
 
 Supply the radio with clean 3.3 V power. Install a local decoupling capacitor near the radio.
 

@@ -9,6 +9,12 @@
 #define PIN_NRF_CE 17
 #define PIN_NRF_IRQ 26
 
+// Local transmitter feedback. D27 on ESP32 DevKit boards is GPIO 27.
+#define PIN_BUZZER 27
+#define PIN_ONBOARD_LED 2
+#define BUZZER_ACTIVE_HIGH true
+#define ONBOARD_LED_ACTIVE_HIGH true
+
 // Matches the FC configuration:
 //   #define RX_BAYANG_PROTOCOL_TELEMETRY_AUTOBIND
 //   #define RX_BAYANG_EXTENDED_TELEMETRY  // Optional; detected automatically by this TX.

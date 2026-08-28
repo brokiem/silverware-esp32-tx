@@ -12,6 +12,7 @@
 
 #include "config.h"
 #include "console/console.h"
+#include "feedback/feedback.h"
 #include "gamepad/button_edges.h"
 #include "gamepad/gamepad_manager.h"
 #include "radio/bayang.h"
@@ -33,6 +34,7 @@ bool radio_initialized = false;
 void publish_state_change(SystemState previous, SystemState current) {
     if (previous == current)
         return;
+    feedback_notify_state(previous, current);
     console_publish_event({ConsoleEventType::StateChanged, previous, current});
 }
 
@@ -273,6 +275,8 @@ void setup() {
 
     gamepad_init();
     failsafe_init();
+    if (!feedback_init(failsafe_get_state()))
+        LOG("WARNING: feedback task unavailable");
     telemetry_init();
     radio_initialized = xn297_init();
     bayang_init(tx_id);

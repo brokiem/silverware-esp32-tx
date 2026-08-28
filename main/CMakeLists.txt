@@ -4,6 +4,8 @@ idf_component_register(
         "gamepad/gamepad_manager.cpp"
         "gamepad/control_mapping.cpp"
         "gamepad/button_edges.cpp"
+        "feedback/feedback.cpp"
+        "feedback/feedback_pattern.cpp"
         "radio/nrf24.cpp"
         "radio/xn297.cpp"
         "radio/bayang.cpp"

@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "../main/config.h"
+#include "../main/feedback/feedback_pattern.h"
 #include "../main/gamepad/button_edges.h"
 #include "../main/gamepad/control_mapping.h"
 #include "../main/radio/bayang.h"
@@ -55,6 +56,29 @@ static void test_start_view_and_disarm_button_edges() {
     edges = detect_button_edges(previous, false, false, true);
     TEST_ASSERT_TRUE(edges.bClicked);
     TEST_ASSERT_FALSE(detect_button_edges(previous, false, false, true).bClicked);
+}
+
+static void test_feedback_state_patterns() {
+    FeedbackOutput output = feedback_pattern(STATE_LOCKED, STATE_ACTIVE, 0);
+    TEST_ASSERT_TRUE(output.ledOn);
+    TEST_ASSERT_TRUE(output.buzzerOn);
+    TEST_ASSERT_FALSE(feedback_pattern(STATE_LOCKED, STATE_ACTIVE, 250).buzzerOn);
+
+    output = feedback_pattern(STATE_ACTIVE, STATE_LOCKED, 75);
+    TEST_ASSERT_TRUE(output.ledOn);
+    TEST_ASSERT_FALSE(output.buzzerOn);
+    TEST_ASSERT_TRUE(feedback_pattern(STATE_ACTIVE, STATE_LOCKED, 150).buzzerOn);
+
+    TEST_ASSERT_TRUE(feedback_pattern(STATE_LOCKED, STATE_BINDING, 50).ledOn);
+    TEST_ASSERT_FALSE(feedback_pattern(STATE_LOCKED, STATE_BINDING, 150).ledOn);
+
+    TEST_ASSERT_TRUE(feedback_pattern(STATE_ACTIVE, STATE_GAMEPAD_FAILSAFE, 10).buzzerOn);
+    TEST_ASSERT_FALSE(feedback_pattern(STATE_ACTIVE, STATE_GAMEPAD_FAILSAFE, 100).buzzerOn);
+    TEST_ASSERT_TRUE(feedback_pattern(STATE_ACTIVE, STATE_GAMEPAD_FAILSAFE, 170).buzzerOn);
+
+    TEST_ASSERT_TRUE(feedback_pattern(STATE_LOCKED, STATE_RADIO_ERROR, 50).ledOn);
+    TEST_ASSERT_FALSE(feedback_pattern(STATE_LOCKED, STATE_RADIO_ERROR, 150).ledOn);
+    TEST_ASSERT_TRUE(feedback_pattern(STATE_LOCKED, STATE_RADIO_ERROR, 450).buzzerOn);
 }
 
 static void test_bayang_packet_flags_clamping_and_checksum() {
@@ -851,6 +875,7 @@ int main(int, char**) {
     RUN_TEST(test_throttle_mapping);
     RUN_TEST(test_bayang_channel_mapping);
     RUN_TEST(test_start_view_and_disarm_button_edges);
+    RUN_TEST(test_feedback_state_patterns);
     RUN_TEST(test_bayang_packet_flags_clamping_and_checksum);
     RUN_TEST(test_golden_centered_packet_and_individual_aux_masks);
     RUN_TEST(test_bayang_bind_packet_and_hopping);
