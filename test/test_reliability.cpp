@@ -242,8 +242,8 @@ static void test_nfe_silverware_autobind_multi_profile() {
     TEST_ASSERT_EQUAL_HEX8(BAYANG_FLAG_PICTURE | BAYANG_FLAG_VIDEO | BAYANG_FLAG_HEADLESS, packet[2]);
     TEST_ASSERT_EQUAL_HEX8(BAYANG_FLAG_INVERTED, packet[3]);
 
-    // Locked control preserves configuration and pitch gestures, but cannot arm or add throttle.
-    controls = nfe_silverware_make_locked_control(true, 1023, aux);
+    // Locked control preserves configuration and stick gestures, but cannot arm or add throttle.
+    controls = nfe_silverware_make_locked_control(true, 512, 1023, aux);
     bayang_build_data_packet(packet, &controls);
     TEST_ASSERT_EQUAL_HEX8(BAYANG_FLAG_PICTURE | BAYANG_FLAG_VIDEO | BAYANG_FLAG_HEADLESS, packet[2]);
     TEST_ASSERT_EQUAL_HEX8(BAYANG_FLAG_INVERTED, packet[3]);
@@ -258,6 +258,24 @@ static void test_nfe_silverware_autobind_multi_profile() {
     TEST_ASSERT_EQUAL_HEX8(0x15, nfe_silverware_aux_flags(restored));
     TEST_ASSERT_FALSE(restored.previousA);
     TEST_ASSERT_FALSE(restored.previousX);
+
+    NfeSilverwareGesturePlayer player = {};
+    NfeSilverwareGestureOutput gesture =
+        nfe_silverware_update_gesture(&player, NfeSilverwareGesture::IncreasePid, 1000000);
+    TEST_ASSERT_TRUE(gesture.active);
+    TEST_ASSERT_EQUAL_UINT16(512, gesture.roll);
+    TEST_ASSERT_EQUAL_UINT16(512, gesture.pitch);
+    gesture = nfe_silverware_update_gesture(&player, NfeSilverwareGesture::None, 1800000);
+    TEST_ASSERT_EQUAL_UINT16(512, gesture.roll);
+    TEST_ASSERT_EQUAL_UINT16(1023, gesture.pitch);
+    gesture = nfe_silverware_update_gesture(&player, NfeSilverwareGesture::None, 2200000);
+    TEST_ASSERT_EQUAL_UINT16(512, gesture.roll);
+    TEST_ASSERT_EQUAL_UINT16(0, gesture.pitch);
+    gesture = nfe_silverware_update_gesture(&player, NfeSilverwareGesture::None, 2600000);
+    TEST_ASSERT_EQUAL_UINT16(1023, gesture.roll);
+    TEST_ASSERT_EQUAL_UINT16(512, gesture.pitch);
+    gesture = nfe_silverware_update_gesture(&player, NfeSilverwareGesture::None, 3000000);
+    TEST_ASSERT_FALSE(gesture.active);
 }
 
 static void test_radio_length_guards_and_status_decode() {

@@ -49,22 +49,16 @@ The new binding works for the current FC power session. Silverware does not save
 
 The Rajawali firmware uses `Up-Up-Up` to enable binding storage. It uses `Down-Down-Down` to save data to flash.
 
-The TX supplies a safe gesture mode while it is `LOCKED`. This mode passes only the right-stick pitch value.
+The TX can send the binding-storage and save gestures automatically while it is `LOCKED`.
 
 1. Make sure that the TX shows `LOCKED`.
-2. Press and hold L3.
-3. Hold the right stick at center for at least 0.7 seconds.
-4. Move the right stick up for 0.1 to 0.5 seconds.
-5. Return the right stick to center.
-6. Repeat steps 4 and 5 two more times.
-7. Hold the right stick at center for at least 0.7 seconds.
-8. Move the right stick down for 0.1 to 0.5 seconds.
-9. Return the right stick to center.
-10. Repeat steps 8 and 9 two more times.
-11. Release L3.
-12. Restart the FC and check the automatic connection.
+2. Hold R3 and press D-pad Up once. Wait for the automatic `Up-Up-Up` gesture to finish.
+3. Keep the aircraft still and level.
+4. Hold R3 and press D-pad Down once. Wait for the automatic `Down-Down-Down` save gesture to finish.
+5. Restart the FC and check the automatic connection.
 
-L3 gesture mode keeps throttle at zero. It also keeps CH5 and all AUX channels off.
+The shortcuts keep throttle and CH5 off. You can also enter gestures manually by
+holding L3 and moving the right stick. See [Gamepad controls](controls.md#fc-gesture-shortcuts).
 
 ## Saved binding behavior
 

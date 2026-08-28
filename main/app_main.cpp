@@ -48,11 +48,48 @@ BayangControlState neutral_control() {
     return state;
 }
 
-BayangControlState locked_control(const ControlState& controls, const NfeSilverwareAuxState& aux_state) {
-    // L3 deliberately enables pitch-only FC gestures while throttle and CH5 remain off.
+NfeSilverwareGesture gesture_request(const ControlState& controls) {
+    if (!controls.btnR3)
+        return NfeSilverwareGesture::None;
+    if (controls.btnDPadDown)
+        return NfeSilverwareGesture::Save;
+    if (controls.btnDPadUp)
+        return NfeSilverwareGesture::ToggleBindStorage;
+    if (controls.btnDPadLeft)
+        return NfeSilverwareGesture::ToggleLowVoltageLanding;
+    if (controls.btnDPadRight)
+        return NfeSilverwareGesture::ToggleFeature1;
+    if (controls.btnA)
+        return NfeSilverwareGesture::TogglePropsDirection;
+    if (controls.btnB)
+        return NfeSilverwareGesture::StickTravelOff;
+    if (controls.btnX)
+        return NfeSilverwareGesture::StickTravelOn;
+    if (controls.btnY)
+        return NfeSilverwareGesture::NextPidTerm;
+    if (controls.btnL3)
+        return NfeSilverwareGesture::NextPidAxis;
+    if (controls.btnRB)
+        return NfeSilverwareGesture::IncreasePid;
+    if (controls.btnLB)
+        return NfeSilverwareGesture::DecreasePid;
+    return NfeSilverwareGesture::None;
+}
+
+BayangControlState locked_control(const ControlState& controls,
+                                  const NfeSilverwareAuxState& aux_state,
+                                  const NfeSilverwareGestureOutput& automatic_gesture) {
+    // Locked gestures can move roll and pitch, but throttle and CH5 remain off.
+    const uint16_t roll = automatic_gesture.active
+                              ? automatic_gesture.roll
+                              : gamepad_get_bayang_channel(controls.rollRaw, false, ROLL_REVERSED,
+                                                          STICK_DEADBAND, ROLL_EXPO);
     const uint16_t pitch =
-        gamepad_get_bayang_channel(controls.pitchRaw, false, PITCH_REVERSED, STICK_DEADBAND, PITCH_EXPO);
-    return nfe_silverware_make_locked_control(controls.connected && controls.btnL3, pitch, aux_state);
+        automatic_gesture.active
+            ? automatic_gesture.pitch
+            : gamepad_get_bayang_channel(controls.pitchRaw, false, PITCH_REVERSED, STICK_DEADBAND, PITCH_EXPO);
+    return nfe_silverware_make_locked_control(automatic_gesture.active || (controls.connected && controls.btnL3),
+                                              roll, pitch, aux_state);
 }
 
 BayangControlState active_control(const ControlState& controls, const NfeSilverwareAuxState& aux_state) {
@@ -93,6 +130,7 @@ void control_radio_task(void*) {
     bool previous_connected = false;
     ButtonEdgeState previous_buttons = {};
     NfeSilverwareAuxState aux_state = {};
+    NfeSilverwareGesturePlayer gesture_player = {};
     uint8_t stored_aux_flags = 0;
     if (load_aux_flags(&stored_aux_flags))
         nfe_silverware_restore_aux(&aux_state, stored_aux_flags);
@@ -148,6 +186,12 @@ void control_radio_task(void*) {
         if (current_aux_flags != previous_aux_flags && !save_aux_flags(current_aux_flags))
             LOG("WARNING: AUX settings persistence failed");
 
+        NfeSilverwareGestureOutput automatic_gesture = {};
+        if (state == STATE_LOCKED)
+            automatic_gesture = nfe_silverware_update_gesture(&gesture_player, gesture_request(controls), cycle_start_us);
+        else
+            nfe_silverware_cancel_gesture(&gesture_player);
+
         uint8_t packet[BAYANG_PACKET_SIZE] = {};
         bool should_transmit = false;
         bool binding_packet = false;
@@ -163,7 +207,8 @@ void control_radio_task(void*) {
         } else if (state != STATE_RADIO_ERROR) {
             const BayangControlState bayang =
                 state == STATE_ACTIVE ? active_control(controls, aux_state)
-                                      : (state == STATE_LOCKED ? locked_control(controls, aux_state) : neutral_control());
+                                      : (state == STATE_LOCKED ? locked_control(controls, aux_state, automatic_gesture)
+                                                               : neutral_control());
             bayang_build_data_packet(packet, &bayang);
             xn297_set_tx_address(tx_id);
             xn297_set_channel(hopping_channels[channel_index]);
