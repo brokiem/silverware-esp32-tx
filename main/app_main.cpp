@@ -93,6 +93,9 @@ void control_radio_task(void*) {
     bool previous_connected = false;
     ButtonEdgeState previous_buttons = {};
     NfeSilverwareAuxState aux_state = {};
+    uint8_t stored_aux_flags = 0;
+    if (load_aux_flags(&stored_aux_flags))
+        nfe_silverware_restore_aux(&aux_state, stored_aux_flags);
     SystemState previous_state = failsafe_get_state();
     int64_t next_status_us = 0;
 #if SERIAL_OUTPUT_MODE == SERIAL_OUTPUT_PC_TELEMETRY
@@ -138,8 +141,12 @@ void control_radio_task(void*) {
         if (previous_state == STATE_BINDING && state != STATE_BINDING)
             channel_index = 0;
         previous_state = state;
+        const uint8_t previous_aux_flags = nfe_silverware_aux_flags(aux_state);
         nfe_silverware_update_aux(&aux_state, state == STATE_ACTIVE, controls.btnA, controls.btnX, controls.btnY,
                                   controls.btnRB, controls.btnLB);
+        const uint8_t current_aux_flags = nfe_silverware_aux_flags(aux_state);
+        if (current_aux_flags != previous_aux_flags && !save_aux_flags(current_aux_flags))
+            LOG("WARNING: AUX settings persistence failed");
 
         uint8_t packet[BAYANG_PACKET_SIZE] = {};
         bool should_transmit = false;

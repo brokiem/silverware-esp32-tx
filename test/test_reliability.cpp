@@ -251,6 +251,13 @@ static void test_nfe_silverware_autobind_multi_profile() {
     TEST_ASSERT_EQUAL_HEX8(0xFF, packet[7]);
     TEST_ASSERT_EQUAL_HEX8(0x7C, packet[8]);
     TEST_ASSERT_EQUAL_HEX8(0x00, packet[9]);
+
+    NfeSilverwareAuxState restored = {};
+    restored.previousA = restored.previousX = true;
+    nfe_silverware_restore_aux(&restored, 0x15);
+    TEST_ASSERT_EQUAL_HEX8(0x15, nfe_silverware_aux_flags(restored));
+    TEST_ASSERT_FALSE(restored.previousA);
+    TEST_ASSERT_FALSE(restored.previousX);
 }
 
 static void test_radio_length_guards_and_status_decode() {
@@ -833,6 +840,7 @@ struct FakeStorage {
     bool readSucceeds;
     bool writeSucceeds;
     uint8_t stored[5];
+    uint8_t aux;
 };
 
 static bool fake_read_id(void* context, uint8_t* tx_id) {
@@ -851,9 +859,25 @@ static bool fake_write_id(void* context, const uint8_t* tx_id) {
     return true;
 }
 
+static bool fake_read_aux(void* context, uint8_t* aux_flags) {
+    FakeStorage* storage = static_cast<FakeStorage*>(context);
+    if (!storage->readSucceeds)
+        return false;
+    *aux_flags = storage->aux;
+    return true;
+}
+
+static bool fake_write_aux(void* context, uint8_t aux_flags) {
+    FakeStorage* storage = static_cast<FakeStorage*>(context);
+    if (!storage->writeSucceeds)
+        return false;
+    storage->aux = aux_flags;
+    return true;
+}
+
 static void test_storage_adapter_failures_and_validation() {
-    FakeStorage fake = {false, false, {1, 2, 3, 4, 5}};
-    const SettingsStorageAdapter adapter = {&fake, fake_read_id, fake_write_id};
+    FakeStorage fake = {false, false, {1, 2, 3, 4, 5}, 0};
+    const SettingsStorageAdapter adapter = {&fake, fake_read_id, fake_write_id, fake_read_aux, fake_write_aux};
     uint8_t id[5] = {};
 
     TEST_ASSERT_FALSE(load_transmitter_id_from(adapter, id));
@@ -868,6 +892,15 @@ static void test_storage_adapter_failures_and_validation() {
     TEST_ASSERT_TRUE(save_transmitter_id_to(adapter, id));
     memset(id, 0, sizeof(id));
     TEST_ASSERT_FALSE(save_transmitter_id_to(adapter, id));
+
+    uint8_t aux_flags = 0;
+    TEST_ASSERT_TRUE(save_aux_flags_to(adapter, SETTINGS_AUX_MASK));
+    TEST_ASSERT_EQUAL_HEX8(SETTINGS_AUX_MASK, fake.aux);
+    TEST_ASSERT_TRUE(load_aux_flags_from(adapter, &aux_flags));
+    TEST_ASSERT_EQUAL_HEX8(SETTINGS_AUX_MASK, aux_flags);
+    TEST_ASSERT_FALSE(save_aux_flags_to(adapter, SETTINGS_AUX_MASK | 0x80));
+    fake.aux = 0x80;
+    TEST_ASSERT_FALSE(load_aux_flags_from(adapter, &aux_flags));
 }
 
 int main(int, char**) {

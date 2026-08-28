@@ -10,6 +10,23 @@ void toggle_on_rising_edge(bool current, bool* previous, bool* value) {
 
 }  // namespace
 
+uint8_t nfe_silverware_aux_flags(const NfeSilverwareAuxState& state) {
+    return (state.levelMode ? 1U << 0 : 0) | (state.raceMode ? 1U << 1 : 0) |
+           (state.horizonMode ? 1U << 2 : 0) | (state.pidProfile ? 1U << 3 : 0) |
+           (state.leds ? 1U << 4 : 0);
+}
+
+void nfe_silverware_restore_aux(NfeSilverwareAuxState* state, uint8_t flags) {
+    if (state == nullptr)
+        return;
+    *state = {};
+    state->levelMode = flags & (1U << 0);
+    state->raceMode = flags & (1U << 1);
+    state->horizonMode = flags & (1U << 2);
+    state->pidProfile = flags & (1U << 3);
+    state->leds = flags & (1U << 4);
+}
+
 void nfe_silverware_update_aux(NfeSilverwareAuxState* state,
                                bool active,
                                bool button_a,

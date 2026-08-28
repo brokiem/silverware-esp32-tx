@@ -16,6 +16,9 @@ struct NfeSilverwareAuxState {
     bool previousLB;
 };
 
+uint8_t nfe_silverware_aux_flags(const NfeSilverwareAuxState& state);
+void nfe_silverware_restore_aux(NfeSilverwareAuxState* state, uint8_t flags);
+
 void nfe_silverware_update_aux(NfeSilverwareAuxState* state,
                                bool active,
                                bool button_a,

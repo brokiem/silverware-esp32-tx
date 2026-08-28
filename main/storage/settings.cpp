@@ -4,6 +4,7 @@
 
 static const char* NVS_NAMESPACE = "bayang_tx";
 static const char* NVS_KEY_TXID = "txid";
+static const char* NVS_KEY_AUX = "aux";
 
 static bool nvs_read_id(void*, uint8_t* tx_id) {
     nvs_handle_t handle;
@@ -30,7 +31,29 @@ static bool nvs_write_id(void*, const uint8_t* tx_id) {
     return err == ESP_OK;
 }
 
-static const SettingsStorageAdapter nvs_storage = {nullptr, nvs_read_id, nvs_write_id};
+static bool nvs_read_aux(void*, uint8_t* aux_flags) {
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle);
+    if (err != ESP_OK)
+        return false;
+    err = nvs_get_u8(handle, NVS_KEY_AUX, aux_flags);
+    nvs_close(handle);
+    return err == ESP_OK;
+}
+
+static bool nvs_write_aux(void*, uint8_t aux_flags) {
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
+    if (err != ESP_OK)
+        return false;
+    err = nvs_set_u8(handle, NVS_KEY_AUX, aux_flags);
+    if (err == ESP_OK)
+        err = nvs_commit(handle);
+    nvs_close(handle);
+    return err == ESP_OK;
+}
+
+static const SettingsStorageAdapter nvs_storage = {nullptr, nvs_read_id, nvs_write_id, nvs_read_aux, nvs_write_aux};
 
 bool load_transmitter_id(uint8_t* tx_id) {
     return load_transmitter_id_from(nvs_storage, tx_id);
@@ -55,4 +78,12 @@ bool generate_and_save_transmitter_id(uint8_t* tx_id) {
 
 bool factory_reset_transmitter_id(uint8_t* tx_id) {
     return generate_and_save_transmitter_id(tx_id);
+}
+
+bool load_aux_flags(uint8_t* aux_flags) {
+    return load_aux_flags_from(nvs_storage, aux_flags);
+}
+
+bool save_aux_flags(uint8_t aux_flags) {
+    return save_aux_flags_to(nvs_storage, aux_flags);
 }
