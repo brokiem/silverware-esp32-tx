@@ -8,7 +8,7 @@
 - NRF24L01+ radio
 - Xbox-compatible gamepad supported by Bluepad32
 - Silverware flight controller with a Bayang receiver
-- Active-high three-pin buzzer module
+- Three-pin passive buzzer module
 
 ## NRF24L01+ wiring
 
@@ -33,7 +33,7 @@ Connect the three-pin buzzer module as follows:
 | Power, `VCC`, or `+` | The module's rated supply |
 | Ground, `GND`, or `-` | ESP32 ground |
 
-GPIO 27 only drives the control input. Do not use it to power the buzzer. The default configuration expects an active-high control input.
+GPIO 27 only drives the control input. Do not use it to power the buzzer. The firmware generates a 2.4 kHz PWM tone for the passive buzzer; the frequency can be changed with `BUZZER_TONE_HZ` in `main/config.h`.
 
 The firmware also uses the ESP32 DevKit onboard LED on GPIO 2. Both pin numbers and active levels can be changed in `main/config.h` for a different board.
 

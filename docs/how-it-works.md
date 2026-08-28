@@ -34,7 +34,7 @@ This task owns these items:
 Bluetooth and the ESP main task run on core 0.
 
 The priority-1 console task prints status and events. The RF task never waits for UART output.
-The priority-1 feedback task drives the buzzer and onboard LED from state transitions. All cue timing is non-blocking and runs outside the RF task.
+The priority-1 feedback task drives the passive buzzer with PWM and controls the onboard LED from state transitions. All cue timing is non-blocking and runs outside the RF task.
 
 ## Radio safety
 

@@ -12,7 +12,7 @@
 // Local transmitter feedback. D27 on ESP32 DevKit boards is GPIO 27.
 #define PIN_BUZZER 27
 #define PIN_ONBOARD_LED 2
-#define BUZZER_ACTIVE_HIGH true
+#define BUZZER_TONE_HZ 2400
 #define ONBOARD_LED_ACTIVE_HIGH true
 
 // Matches the FC configuration:
