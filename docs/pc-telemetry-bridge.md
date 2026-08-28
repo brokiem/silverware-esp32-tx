@@ -153,6 +153,13 @@ The decoded type-2 record is 60 bytes and its COBS frame is at most 62 bytes. At
 
 ## PC reader behavior
 
+The included [ground station](../tools/ground_station/README.md) implements this reader, a responsive dashboard, automatic serial reconnection, and rotating blackbox logs:
+
+```sh
+python3 -m pip install -r tools/ground_station/requirements.txt
+python3 tools/ground_station/ground_station.py
+```
+
 1. Open the serial port at 115200 baud.
 2. Discard input through the first `0x00` synchronization delimiter.
 3. Split subsequent input at each `0x00`.

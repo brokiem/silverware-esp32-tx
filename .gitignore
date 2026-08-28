@@ -13,6 +13,10 @@ managed_components/
 # misc
 .clang_complete
 .gcc-flags.json
+/tools/ground_station/logs/*
+!/tools/ground_station/logs/.gitkeep
+__pycache__/
+*.py[cod]
 
 # Ignore vim swaps
 *.swp
