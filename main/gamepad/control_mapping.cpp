@@ -2,6 +2,8 @@
 
 #include <math.h>
 
+#include "../config.h"
+
 static float clamp_float(float value, float minimum, float maximum) {
     if (value < minimum)
         return minimum;
@@ -34,7 +36,7 @@ uint16_t map_bayang_channel(int32_t raw_value, bool is_throttle, bool reversed, 
         float normalized = clamp_float(static_cast<float>(raw_value) / 1023.0f, 0.0f, 1.0f);
         if (reversed)
             normalized = 1.0f - normalized;
-        return static_cast<uint16_t>(normalized * 1023.0f);
+        return static_cast<uint16_t>(normalized * 1023.0f * THROTTLE_MAX_PERCENT / 100.0f);
     }
 
     deadband = clamp_float(deadband, 0.0f, 0.99f);

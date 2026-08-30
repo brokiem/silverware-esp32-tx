@@ -34,7 +34,8 @@ static void test_throttle_mapping() {
 
 static void test_bayang_channel_mapping() {
     TEST_ASSERT_EQUAL_UINT16(0, map_bayang_channel(-100, true, false, 0.0f, 0.0f));
-    TEST_ASSERT_EQUAL_UINT16(1023, map_bayang_channel(1023, true, false, 0.0f, 0.0f));
+    TEST_ASSERT_EQUAL_UINT16(767, map_bayang_channel(1023, true, false, 0.0f, 0.0f));
+    TEST_ASSERT_EQUAL_UINT16(384, map_bayang_channel(512, true, false, 0.0f, 0.0f));
     TEST_ASSERT_EQUAL_UINT16(512, map_bayang_channel(0, false, false, 0.05f, 0.0f));
     TEST_ASSERT_EQUAL_UINT16(512, map_bayang_channel(0, false, true, 0.05f, 0.0f));
 }
