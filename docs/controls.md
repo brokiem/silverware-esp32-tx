@@ -14,7 +14,9 @@
 | Right stick up or down | Pitch |
 | Right stick left or right | Roll |
 
-The center and lower half of the throttle axis produce zero throttle. This behavior applies to the default half-stick configuration.
+The center and lower half of the throttle axis produce zero throttle. The upper
+half spans the full throttle range. This behavior applies to the default
+half-stick configuration.
 
 ## Buttons
 

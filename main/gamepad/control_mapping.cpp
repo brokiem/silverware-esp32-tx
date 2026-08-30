@@ -26,7 +26,7 @@ uint16_t map_half_stick_throttle(int32_t raw_axis_y, float deadband) {
         return 0;
 
     normalized = (normalized - deadband) / (1.0f - deadband);
-    return static_cast<uint16_t>(clamp_float(normalized, 0.0f, 1.0f) * 511.0f);
+    return static_cast<uint16_t>(clamp_float(normalized, 0.0f, 1.0f) * 1023.0f);
 }
 
 uint16_t map_bayang_channel(int32_t raw_value, bool is_throttle, bool reversed, float deadband, float expo) {

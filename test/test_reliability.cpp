@@ -27,7 +27,7 @@ static void test_throttle_mapping() {
     TEST_ASSERT_EQUAL_UINT16(512, map_trigger_throttle(512));
     TEST_ASSERT_EQUAL_UINT16(1023, map_trigger_throttle(2048));
 
-    TEST_ASSERT_EQUAL_UINT16(511, map_half_stick_throttle(-512, 0.05f));
+    TEST_ASSERT_EQUAL_UINT16(1023, map_half_stick_throttle(-512, 0.05f));
     TEST_ASSERT_EQUAL_UINT16(0, map_half_stick_throttle(0, 0.05f));
     TEST_ASSERT_EQUAL_UINT16(0, map_half_stick_throttle(511, 0.05f));
 }
