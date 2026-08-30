@@ -89,20 +89,22 @@ void nfe_silverware_cancel_gesture(NfeSilverwareGesturePlayer* player) {
 }
 
 uint8_t nfe_silverware_aux_flags(const NfeSilverwareAuxState& state) {
-    return (state.levelMode ? 1U << 0 : 0) | (state.raceMode ? 1U << 1 : 0) |
-           (state.horizonMode ? 1U << 2 : 0) | (state.pidProfile ? 1U << 3 : 0) |
-           (state.leds ? 1U << 4 : 0);
+    return (state.levelMode ? NFE_SILVERWARE_AUX_LEVEL : 0) |
+           (state.raceMode ? NFE_SILVERWARE_AUX_RACE : 0) |
+           (state.horizonMode ? NFE_SILVERWARE_AUX_HORIZON : 0) |
+           (state.pidProfile ? NFE_SILVERWARE_AUX_PID_PROFILE : 0) |
+           (state.leds ? NFE_SILVERWARE_AUX_LEDS : 0);
 }
 
 void nfe_silverware_restore_aux(NfeSilverwareAuxState* state, uint8_t flags) {
     if (state == nullptr)
         return;
     *state = {};
-    state->levelMode = flags & (1U << 0);
-    state->raceMode = flags & (1U << 1);
-    state->horizonMode = flags & (1U << 2);
-    state->pidProfile = flags & (1U << 3);
-    state->leds = flags & (1U << 4);
+    state->levelMode = flags & NFE_SILVERWARE_AUX_LEVEL;
+    state->raceMode = flags & NFE_SILVERWARE_AUX_RACE;
+    state->horizonMode = flags & NFE_SILVERWARE_AUX_HORIZON;
+    state->pidProfile = flags & NFE_SILVERWARE_AUX_PID_PROFILE;
+    state->leds = flags & NFE_SILVERWARE_AUX_LEDS;
 }
 
 void nfe_silverware_update_aux(NfeSilverwareAuxState* state,
@@ -138,13 +140,11 @@ void nfe_silverware_apply_multi_aux(BayangControlState* controls, bool active, c
 
 BayangControlState nfe_silverware_make_locked_control(bool gesture_enabled,
                                                       uint16_t gesture_roll,
-                                                      uint16_t gesture_pitch,
-                                                      const NfeSilverwareAuxState& state) {
+                                                      uint16_t gesture_pitch) {
     BayangControlState controls = {};
     controls.roll = gesture_enabled ? gesture_roll : 512;
     controls.pitch = gesture_enabled ? gesture_pitch : 512;
     controls.yaw = 512;
     controls.throttle = 0;
-    nfe_silverware_apply_multi_aux(&controls, false, state);
     return controls;
 }

@@ -19,6 +19,7 @@
 #include "radio/nfe_silverware_profile.h"
 #include "radio/xn297.h"
 #include "safety/failsafe.h"
+#include "safety/prearm_guard.h"
 #include "storage/settings.h"
 #include "telemetry/telemetry.h"
 #include "telemetry/pc_telemetry_export.h"
@@ -26,6 +27,9 @@
 #include "util/log.h"
 
 namespace {
+
+static_assert(SETTINGS_AUX_MASK == NFE_SILVERWARE_AUX_MASK,
+              "Persistent settings and NFE Silverware AUX layouts differ");
 
 uint8_t tx_id[5] = {};
 uint8_t hopping_channels[BAYANG_RF_CHANNELS] = {};
@@ -77,9 +81,12 @@ NfeSilverwareGesture gesture_request(const ControlState& controls) {
 }
 
 BayangControlState locked_control(const ControlState& controls,
-                                  const NfeSilverwareAuxState& aux_state,
                                   const NfeSilverwareGestureOutput& automatic_gesture) {
     // Locked gestures can move roll and pitch, but throttle and CH5 remain off.
+    const bool manual_gesture = controls.connected && controls.btnL3;
+    if (!automatic_gesture.active && !manual_gesture)
+        return nfe_silverware_make_locked_control(false, 512, 512);
+
     const uint16_t roll = automatic_gesture.active
                               ? automatic_gesture.roll
                               : gamepad_get_bayang_channel(controls.rollRaw, false, ROLL_REVERSED,
@@ -88,8 +95,7 @@ BayangControlState locked_control(const ControlState& controls,
         automatic_gesture.active
             ? automatic_gesture.pitch
             : gamepad_get_bayang_channel(controls.pitchRaw, false, PITCH_REVERSED, STICK_DEADBAND, PITCH_EXPO);
-    return nfe_silverware_make_locked_control(automatic_gesture.active || (controls.connected && controls.btnL3),
-                                              roll, pitch, aux_state);
+    return nfe_silverware_make_locked_control(true, roll, pitch);
 }
 
 BayangControlState active_control(const ControlState& controls, const NfeSilverwareAuxState& aux_state) {
@@ -99,6 +105,16 @@ BayangControlState active_control(const ControlState& controls, const NfeSilverw
     state.yaw = gamepad_get_bayang_channel(controls.yawRaw, false, YAW_REVERSED, STICK_DEADBAND, YAW_EXPO);
     state.throttle = gamepad_get_bayang_channel(controls.throttleRaw, true, false, 0.0f, 0.0f);
     nfe_silverware_apply_multi_aux(&state, true, aux_state);
+    return state;
+}
+
+BayangControlState prearm_control(const NfeSilverwareAuxState& aux_state) {
+    BayangControlState state = {};
+    state.roll = 512;
+    state.pitch = 512;
+    state.yaw = 512;
+    state.throttle = 0;
+    nfe_silverware_apply_multi_aux(&state, false, aux_state);
     return state;
 }
 
@@ -136,6 +152,7 @@ void control_radio_task(void*) {
         nfe_silverware_restore_aux(&aux_state, stored_aux_flags);
     SystemState previous_state = failsafe_get_state();
     int64_t next_status_us = 0;
+    int64_t prearm_started_us = 0;
 #if SERIAL_OUTPUT_MODE == SERIAL_OUTPUT_PC_TELEMETRY
     int64_t next_local_state_us = 0;
 #endif
@@ -173,8 +190,20 @@ void control_radio_task(void*) {
         const SystemState before_update = failsafe_get_state();
         failsafe_update_at(cycle_start_us, controls.connected, controls.lastUpdateUs,
                            controls.throttleRaw <= ARM_THROTTLE_MAX, edges.startClicked, edges.viewClicked,
-                           edges.bClicked || (edges.startClicked && before_update == STATE_ACTIVE));
+                           edges.bClicked ||
+                               (edges.startClicked &&
+                                (before_update == STATE_ACTIVE || before_update == STATE_PREARM_MODE)));
         SystemState state = failsafe_get_state();
+        if (before_update != STATE_PREARM_MODE && state == STATE_PREARM_MODE)
+            prearm_started_us = cycle_start_us;
+        if (state == STATE_PREARM_MODE) {
+            if (prearm_configuration_confirmed(telemetry_get_snapshot(cycle_start_us), aux_state,
+                                                prearm_started_us))
+                failsafe_complete_prearm();
+            else if ((cycle_start_us - prearm_started_us) >= PREARM_MODE_TIMEOUT_US)
+                failsafe_cancel_prearm();
+            state = failsafe_get_state();
+        }
         publish_state_change(previous_state, state);
         if (previous_state == STATE_BINDING && state != STATE_BINDING)
             channel_index = 0;
@@ -205,10 +234,13 @@ void control_radio_task(void*) {
             should_transmit = true;
             binding_packet = true;
         } else if (state != STATE_RADIO_ERROR) {
-            const BayangControlState bayang =
-                state == STATE_ACTIVE ? active_control(controls, aux_state)
-                                      : (state == STATE_LOCKED ? locked_control(controls, aux_state, automatic_gesture)
-                                                               : neutral_control());
+            BayangControlState bayang = neutral_control();
+            if (state == STATE_ACTIVE)
+                bayang = active_control(controls, aux_state);
+            else if (state == STATE_PREARM_MODE)
+                bayang = prearm_control(aux_state);
+            else if (state == STATE_LOCKED)
+                bayang = locked_control(controls, automatic_gesture);
             bayang_build_data_packet(packet, &bayang);
             xn297_set_tx_address(tx_id);
             xn297_set_channel(hopping_channels[channel_index]);
@@ -239,7 +271,12 @@ void control_radio_task(void*) {
                             if (xn297_read_payload(received, sizeof(received)) && telemetry_parse(received, received_us)) {
                                 ++stats.telemetryAccepted;
 #if SERIAL_OUTPUT_MODE == SERIAL_OUTPUT_PC_TELEMETRY
-                                pc_telemetry_export_publish_bayang(received, received_us);
+                                const bool show_saved_flight_config =
+                                    state == STATE_LOCKED || state == STATE_WAIT_GAMEPAD ||
+                                    state == STATE_GAMEPAD_FAILSAFE;
+                                pc_telemetry_export_publish_bayang(
+                                    received, received_us, show_saved_flight_config,
+                                    nfe_silverware_aux_flags(aux_state));
 #endif
                             } else {
                                 ++stats.telemetryRejected;

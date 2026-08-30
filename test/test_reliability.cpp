@@ -12,16 +12,14 @@
 #include "../main/radio/nfe_silverware_profile.h"
 #include "../main/radio/radio_validation.h"
 #include "../main/safety/failsafe.h"
+#include "../main/safety/prearm_guard.h"
 #include "../main/storage/settings.h"
 #include "../main/telemetry/telemetry.h"
 #include "../main/telemetry/pc_telemetry_protocol.h"
 #include "../main/telemetry/pc_telemetry_state.h"
 
 static void set_checksum(uint8_t* packet) {
-    uint8_t checksum = 0;
-    for (uint8_t i = 0; i < BAYANG_PACKET_SIZE - 1; ++i)
-        checksum += packet[i];
-    packet[BAYANG_PACKET_SIZE - 1] = checksum;
+    packet[BAYANG_PACKET_SIZE - 1] = bayang_calculate_checksum(packet);
 }
 
 static void test_throttle_mapping() {
@@ -79,6 +77,8 @@ static void test_feedback_state_patterns() {
     TEST_ASSERT_TRUE(feedback_pattern(STATE_LOCKED, STATE_RADIO_ERROR, 50).ledOn);
     TEST_ASSERT_FALSE(feedback_pattern(STATE_LOCKED, STATE_RADIO_ERROR, 150).ledOn);
     TEST_ASSERT_TRUE(feedback_pattern(STATE_LOCKED, STATE_RADIO_ERROR, 450).buzzerOn);
+    TEST_ASSERT_TRUE(feedback_pattern(STATE_LOCKED, STATE_PREARM_MODE, 50).ledOn);
+    TEST_ASSERT_FALSE(feedback_pattern(STATE_LOCKED, STATE_PREARM_MODE, 150).ledOn);
 }
 
 static void test_bayang_packet_flags_clamping_and_checksum() {
@@ -242,12 +242,12 @@ static void test_nfe_silverware_autobind_multi_profile() {
     TEST_ASSERT_EQUAL_HEX8(BAYANG_FLAG_PICTURE | BAYANG_FLAG_VIDEO | BAYANG_FLAG_HEADLESS, packet[2]);
     TEST_ASSERT_EQUAL_HEX8(BAYANG_FLAG_INVERTED, packet[3]);
 
-    // Locked control preserves configuration and stick gestures, but cannot arm or add throttle.
-    controls = nfe_silverware_make_locked_control(true, 512, 1023, aux);
+    // Locked control advertises Acro while allowing stick gestures, but cannot arm or add throttle.
+    controls = nfe_silverware_make_locked_control(true, 512, 1023);
     bayang_build_data_packet(packet, &controls);
-    TEST_ASSERT_EQUAL_HEX8(BAYANG_FLAG_PICTURE | BAYANG_FLAG_VIDEO | BAYANG_FLAG_HEADLESS, packet[2]);
-    TEST_ASSERT_EQUAL_HEX8(BAYANG_FLAG_INVERTED, packet[3]);
-    TEST_ASSERT_EQUAL_HEX8(0x7F, packet[6]);
+    TEST_ASSERT_EQUAL_HEX8(0, packet[2]);
+    TEST_ASSERT_EQUAL_HEX8(0, packet[3]);
+    TEST_ASSERT_EQUAL_HEX8(0xFF, packet[6]);
     TEST_ASSERT_EQUAL_HEX8(0xFF, packet[7]);
     TEST_ASSERT_EQUAL_HEX8(0x7C, packet[8]);
     TEST_ASSERT_EQUAL_HEX8(0x00, packet[9]);
@@ -417,6 +417,7 @@ static void test_extended_control_and_flight_pages() {
     TEST_ASSERT_FLOAT_WITHIN(0.001f, -2.0f, snapshot.data.accelYG);
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 7.996f, snapshot.data.accelZG);
     TEST_ASSERT_EQUAL_UINT16(4321, snapshot.data.flightTimeSeconds);
+    TEST_ASSERT_EQUAL_INT64(2000, snapshot.data.lastFlightPageUs);
     TEST_ASSERT_EQUAL_UINT16(TELEMETRY_EXTENDED_PAGE_CONTROL | TELEMETRY_EXTENDED_PAGE_FLIGHT,
                              snapshot.data.extendedPagesSeen);
 }
@@ -615,6 +616,47 @@ static void test_pc_telemetry_golden_frame_and_copy() {
     TEST_ASSERT_FALSE(pc_telemetry_decode_frame(frame, frame_length, &decoded));
 }
 
+static void test_pc_telemetry_saved_flight_config_overlay() {
+    uint8_t packet[BAYANG_PACKET_SIZE];
+    make_extended_telemetry(packet, 1, 0);
+    packet[13] = 0x07;  // Preserve ground, idle-up, and low-voltage status.
+    set_checksum(packet);
+
+    const uint8_t saved_aux = NFE_SILVERWARE_AUX_LEVEL | NFE_SILVERWARE_AUX_RACE |
+                              NFE_SILVERWARE_AUX_HORIZON | NFE_SILVERWARE_AUX_PID_PROFILE |
+                              NFE_SILVERWARE_AUX_LEDS;
+    TEST_ASSERT_TRUE(pc_telemetry_overlay_saved_flight_config(packet, saved_aux));
+    TEST_ASSERT_EQUAL_HEX8(0x7F, packet[13]);
+    TEST_ASSERT_TRUE(bayang_check_telemetry(packet));
+
+    TEST_ASSERT_TRUE(pc_telemetry_overlay_saved_flight_config(packet, 0));
+    TEST_ASSERT_EQUAL_HEX8(0x07, packet[13]);
+    TEST_ASSERT_TRUE(bayang_check_telemetry(packet));
+    TEST_ASSERT_TRUE(pc_telemetry_overlay_saved_flight_config(packet, saved_aux));
+
+    telemetry_init();
+    TEST_ASSERT_TRUE(telemetry_parse(packet, 1000));
+    const TelemetrySnapshot snapshot = telemetry_get_snapshot(1000);
+    TEST_ASSERT_EQUAL(static_cast<int>(FlightMode::RaceHorizon), static_cast<int>(snapshot.data.flightMode));
+    TEST_ASSERT_TRUE(snapshot.data.pidProfile);
+    TEST_ASSERT_TRUE(snapshot.data.onGround);
+    TEST_ASSERT_TRUE(snapshot.data.idleUp);
+    TEST_ASSERT_TRUE(snapshot.data.lowVoltage);
+
+    make_extended_telemetry(packet, 0, 0);
+    set_checksum(packet);
+    uint8_t original[BAYANG_PACKET_SIZE];
+    memcpy(original, packet, sizeof(original));
+    TEST_ASSERT_FALSE(pc_telemetry_overlay_saved_flight_config(packet, saved_aux));
+    TEST_ASSERT_EQUAL_MEMORY(original, packet, sizeof(packet));
+
+    make_extended_telemetry(packet, 1, 0);
+    packet[14] ^= 1U;
+    memcpy(original, packet, sizeof(original));
+    TEST_ASSERT_FALSE(pc_telemetry_overlay_saved_flight_config(packet, saved_aux));
+    TEST_ASSERT_EQUAL_MEMORY(original, packet, sizeof(packet));
+}
+
 static void test_pc_telemetry_original_wrap_and_resynchronization() {
     uint8_t packet[BAYANG_PACKET_SIZE];
     make_valid_telemetry(packet);
@@ -758,8 +800,9 @@ static void test_pc_telemetry_local_state_derivation() {
     TEST_ASSERT_EQUAL_UINT16(200, state.fcTelemetryAgeMs);
     TEST_ASSERT_EQUAL_UINT32(15, state.exportQueueDrops);
 
-    const SystemState states[] = {STATE_BOOT,          STATE_WAIT_GAMEPAD,    STATE_BINDING,   STATE_LOCKED,
-                                  STATE_ACTIVE,        STATE_GAMEPAD_FAILSAFE, STATE_RADIO_ERROR};
+    const SystemState states[] = {STATE_BOOT,           STATE_WAIT_GAMEPAD,     STATE_BINDING,   STATE_LOCKED,
+                                  STATE_ACTIVE,         STATE_GAMEPAD_FAILSAFE, STATE_RADIO_ERROR,
+                                  STATE_PREARM_MODE};
     for (SystemState system_state : states) {
         input.systemState = system_state;
         state = pc_telemetry_make_local_state(input);
@@ -821,6 +864,43 @@ static void test_telemetry_never_state() {
                       static_cast<int>(telemetry_get_snapshot(1234).freshness));
 }
 
+static void test_prearm_configuration_guard() {
+    NfeSilverwareAuxState aux = {};
+    aux.levelMode = true;
+    aux.horizonMode = true;
+    aux.pidProfile = true;
+
+    TelemetrySnapshot snapshot = {};
+    snapshot.freshness = TelemetryFreshness::Fresh;
+    snapshot.data.protocol = TelemetryProtocol::ExtendedV1;
+    snapshot.data.lastValidUs = 1100;
+    snapshot.data.lastFlightPageUs = 1100;
+    snapshot.data.flightMode = FlightMode::Horizon;
+    snapshot.data.pidProfile = true;
+    TEST_ASSERT_TRUE(prearm_configuration_confirmed(snapshot, aux, 1000));
+
+    snapshot.data.lastFlightPageUs = 1000;
+    TEST_ASSERT_FALSE(prearm_configuration_confirmed(snapshot, aux, 1000));
+    snapshot.data.lastFlightPageUs = 1100;
+    snapshot.data.armed = true;
+    TEST_ASSERT_FALSE(prearm_configuration_confirmed(snapshot, aux, 1000));
+    snapshot.data.armed = false;
+    snapshot.data.flightMode = FlightMode::Race;
+    TEST_ASSERT_FALSE(prearm_configuration_confirmed(snapshot, aux, 1000));
+    snapshot.data.flightMode = FlightMode::Horizon;
+    snapshot.data.pidProfile = false;
+    TEST_ASSERT_FALSE(prearm_configuration_confirmed(snapshot, aux, 1000));
+
+    snapshot.data.protocol = TelemetryProtocol::Original;
+    snapshot.data.lastValidUs = 1100;
+    TEST_ASSERT_TRUE(prearm_configuration_confirmed(snapshot, aux, 1000));
+    snapshot.data.lastValidUs = 1000;
+    TEST_ASSERT_FALSE(prearm_configuration_confirmed(snapshot, aux, 1000));
+    snapshot.data.lastValidUs = 1100;
+    snapshot.freshness = TelemetryFreshness::Stale;
+    TEST_ASSERT_FALSE(prearm_configuration_confirmed(snapshot, aux, 1000));
+}
+
 static void test_failsafe_transitions() {
     failsafe_init();
     failsafe_update_at(0, true, 0, true, false, false, false);
@@ -830,6 +910,8 @@ static void test_failsafe_transitions() {
     TEST_ASSERT_EQUAL(STATE_LOCKED, failsafe_get_state());
 
     failsafe_update_at(2000, true, 2000, true, true, false, false);
+    TEST_ASSERT_EQUAL(STATE_PREARM_MODE, failsafe_get_state());
+    failsafe_complete_prearm();
     TEST_ASSERT_EQUAL(STATE_ACTIVE, failsafe_get_state());
 
     failsafe_update_at(502000, true, 2000, true, false, false, false);
@@ -838,6 +920,16 @@ static void test_failsafe_transitions() {
     TEST_ASSERT_EQUAL(STATE_GAMEPAD_FAILSAFE, failsafe_get_state());
 
     failsafe_update_at(503000, true, 503000, true, false, false, false);
+    TEST_ASSERT_EQUAL(STATE_LOCKED, failsafe_get_state());
+
+    failsafe_update_at(504000, true, 504000, true, true, false, false);
+    TEST_ASSERT_EQUAL(STATE_PREARM_MODE, failsafe_get_state());
+    failsafe_update_at(505000, true, 505000, false, false, false, false);
+    TEST_ASSERT_EQUAL(STATE_LOCKED, failsafe_get_state());
+
+    failsafe_update_at(506000, true, 506000, true, true, false, false);
+    TEST_ASSERT_EQUAL(STATE_PREARM_MODE, failsafe_get_state());
+    failsafe_cancel_prearm();
     TEST_ASSERT_EQUAL(STATE_LOCKED, failsafe_get_state());
 }
 
@@ -939,11 +1031,13 @@ int main(int, char**) {
     RUN_TEST(test_extended_sequence_checksum_and_protocol_transitions);
     RUN_TEST(test_pc_telemetry_crc_and_cobs);
     RUN_TEST(test_pc_telemetry_golden_frame_and_copy);
+    RUN_TEST(test_pc_telemetry_saved_flight_config_overlay);
     RUN_TEST(test_pc_telemetry_original_wrap_and_resynchronization);
     RUN_TEST(test_pc_telemetry_local_state_golden_frame);
     RUN_TEST(test_pc_telemetry_local_state_derivation);
     RUN_TEST(test_pc_telemetry_local_state_ages_and_schedule);
     RUN_TEST(test_telemetry_never_state);
+    RUN_TEST(test_prearm_configuration_guard);
     RUN_TEST(test_failsafe_transitions);
     RUN_TEST(test_binding_and_radio_error_latch);
     RUN_TEST(test_storage_adapter_failures_and_validation);

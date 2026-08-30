@@ -2,6 +2,18 @@
 
 #include "bayang.h"
 
+enum NfeSilverwareAuxFlag : uint8_t {
+    NFE_SILVERWARE_AUX_LEVEL = 1U << 0,
+    NFE_SILVERWARE_AUX_RACE = 1U << 1,
+    NFE_SILVERWARE_AUX_HORIZON = 1U << 2,
+    NFE_SILVERWARE_AUX_PID_PROFILE = 1U << 3,
+    NFE_SILVERWARE_AUX_LEDS = 1U << 4,
+};
+
+inline constexpr uint8_t NFE_SILVERWARE_AUX_MASK =
+    NFE_SILVERWARE_AUX_LEVEL | NFE_SILVERWARE_AUX_RACE | NFE_SILVERWARE_AUX_HORIZON |
+    NFE_SILVERWARE_AUX_PID_PROFILE | NFE_SILVERWARE_AUX_LEDS;
+
 struct NfeSilverwareAuxState {
     bool levelMode;
     bool raceMode;
@@ -60,5 +72,4 @@ void nfe_silverware_update_aux(NfeSilverwareAuxState* state,
 void nfe_silverware_apply_multi_aux(BayangControlState* controls, bool active, const NfeSilverwareAuxState& state);
 BayangControlState nfe_silverware_make_locked_control(bool gesture_enabled,
                                                       uint16_t gesture_roll,
-                                                      uint16_t gesture_pitch,
-                                                      const NfeSilverwareAuxState& state);
+                                                      uint16_t gesture_pitch);

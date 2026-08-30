@@ -51,6 +51,11 @@ FeedbackOutput feedback_pattern(SystemState previous, SystemState current, uint3
             output.buzzerOn = elapsed_ms < 200;
             break;
 
+        case STATE_PREARM_MODE:
+            output.ledOn = pulse(elapsed_ms, 200, 100);
+            output.buzzerOn = elapsed_ms < 80;
+            break;
+
         case STATE_GAMEPAD_FAILSAFE: {
             output.ledOn = pulse(elapsed_ms, 200, 100);
             const uint32_t phase_ms = elapsed_ms % 1200;

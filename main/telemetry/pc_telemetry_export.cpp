@@ -20,6 +20,8 @@ struct ExportItem {
     uint16_t sequence;
     uint64_t timestampUs;
     uint8_t packet[BAYANG_PACKET_SIZE];
+    bool overlaySavedFlightConfig;
+    uint8_t savedAuxFlags;
     PcTelemetryLocalState localState;
 };
 
@@ -50,6 +52,8 @@ void export_task(void*) {
 
         size_t frame_length = 0;
         if (item.messageType == PC_TELEMETRY_MESSAGE_RAW_BAYANG) {
+            if (item.overlaySavedFlightConfig)
+                pc_telemetry_overlay_saved_flight_config(item.packet, item.savedAuxFlags);
             PcTelemetrySample sample = {};
             pc_telemetry_make_sample(&sample, item.packet, item.timestampUs, item.sequence);
             frame_length = pc_telemetry_encode_frame(sample, frame, sizeof(frame));
@@ -79,7 +83,8 @@ bool pc_telemetry_export_init() {
     return true;
 }
 
-void pc_telemetry_export_publish_bayang(const uint8_t* packet, int64_t timestamp_us) {
+void pc_telemetry_export_publish_bayang(const uint8_t* packet, int64_t timestamp_us,
+                                        bool overlay_saved_flight_config, uint8_t saved_aux_flags) {
     if (packet == nullptr)
         return;
     ExportItem item = {};
@@ -87,6 +92,8 @@ void pc_telemetry_export_publish_bayang(const uint8_t* packet, int64_t timestamp
     item.sequence = next_bayang_sequence++;
     item.timestampUs = static_cast<uint64_t>(timestamp_us);
     memcpy(item.packet, packet, BAYANG_PACKET_SIZE);
+    item.overlaySavedFlightConfig = overlay_saved_flight_config;
+    item.savedAuxFlags = saved_aux_flags;
     enqueue(item);
 }
 
@@ -109,7 +116,7 @@ bool pc_telemetry_export_init() {
     return true;
 }
 
-void pc_telemetry_export_publish_bayang(const uint8_t*, int64_t) {}
+void pc_telemetry_export_publish_bayang(const uint8_t*, int64_t, bool, uint8_t) {}
 
 void pc_telemetry_export_publish_local_state(const PcTelemetryLocalState&, int64_t) {}
 

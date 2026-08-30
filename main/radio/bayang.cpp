@@ -1,17 +1,9 @@
 #include "bayang.h"
+
 #include <string.h>
-#include "../config.h"
 
 static uint8_t rx_tx_addr[BAYANG_ADDRESS_LENGTH];
 static uint8_t hopping_channels[BAYANG_RF_CHANNELS];
-
-static uint8_t calculate_checksum(const uint8_t* packet) {
-    uint8_t sum = 0;
-    for (int i = 0; i < BAYANG_PACKET_SIZE - 1; i++) {
-        sum += packet[i];
-    }
-    return sum;
-}
 
 static uint8_t dynamic_trim(uint16_t v) {
     return (v >> 2) & 0xFC;
@@ -57,7 +49,7 @@ void bayang_build_bind_packet(uint8_t* packet, uint8_t bind_header) {
         packet[13] = 0x00;
     }
 
-    packet[14] = calculate_checksum(packet);
+    packet[14] = bayang_calculate_checksum(packet);
 }
 
 void bayang_build_data_packet(uint8_t* packet, const struct BayangControlState* state) {
@@ -107,7 +99,16 @@ void bayang_build_data_packet(uint8_t* packet, const struct BayangControlState* 
     packet[12] = rx_tx_addr[2];
     packet[13] = 0x0A;  // Analog AUX disabled
 
-    packet[14] = calculate_checksum(packet);
+    packet[14] = bayang_calculate_checksum(packet);
+}
+
+uint8_t bayang_calculate_checksum(const uint8_t* packet) {
+    if (packet == nullptr)
+        return 0;
+    uint8_t sum = 0;
+    for (uint8_t index = 0; index < BAYANG_PACKET_SIZE - 1; ++index)
+        sum += packet[index];
+    return sum;
 }
 
 bool bayang_check_telemetry(const uint8_t* packet) {
@@ -116,7 +117,7 @@ bool bayang_check_telemetry(const uint8_t* packet) {
 
     // Original NFE Silverware Bayang telemetry has no RF CRC. Its protocol
     // integrity check is the 8-bit additive checksum in byte 14.
-    if (calculate_checksum(packet) != packet[14])
+    if (bayang_calculate_checksum(packet) != packet[14])
         return false;
 
     return true;

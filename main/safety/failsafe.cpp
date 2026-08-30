@@ -40,7 +40,15 @@ void failsafe_update_at(int64_t now,
                 current_state = STATE_BINDING;
                 bind_start = now;
             } else if (unlock_clicked && throttle_idle) {
-                current_state = STATE_ACTIVE;
+                current_state = STATE_PREARM_MODE;
+            }
+            break;
+
+        case STATE_PREARM_MODE:
+            if (gamepad_timeout) {
+                current_state = STATE_GAMEPAD_FAILSAFE;
+            } else if (disarm_clicked || !throttle_idle) {
+                current_state = STATE_LOCKED;
             }
             break;
 
@@ -78,6 +86,16 @@ void failsafe_update_at(int64_t now,
 
 void failsafe_report_radio_error() {
     current_state = STATE_RADIO_ERROR;
+}
+
+void failsafe_complete_prearm() {
+    if (current_state == STATE_PREARM_MODE)
+        current_state = STATE_ACTIVE;
+}
+
+void failsafe_cancel_prearm() {
+    if (current_state == STATE_PREARM_MODE)
+        current_state = STATE_LOCKED;
 }
 
 enum SystemState failsafe_get_state() {

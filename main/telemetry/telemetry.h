@@ -58,6 +58,7 @@ struct TelemetryData {
     float appliedThrottlePercent;
     float motorOutputPercent[4];
     uint16_t flightTimeSeconds;
+    int64_t lastFlightPageUs;
     uint8_t packetsLostPerSecond;
     uint8_t linkQualityPercent;
     float maximumRxGapMs;

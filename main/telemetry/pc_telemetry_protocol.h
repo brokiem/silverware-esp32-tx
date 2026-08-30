@@ -85,6 +85,7 @@ struct PcTelemetryLocalState {
 
 void pc_telemetry_make_sample(PcTelemetrySample* sample, const uint8_t* packet, uint64_t timestamp_us,
                               uint16_t sequence);
+bool pc_telemetry_overlay_saved_flight_config(uint8_t* packet, uint8_t saved_aux_flags);
 uint16_t pc_telemetry_crc16_ccitt_false(const uint8_t* data, size_t length);
 size_t pc_telemetry_cobs_max_encoded_size(size_t input_length);
 size_t pc_telemetry_cobs_encode(const uint8_t* input, size_t input_length, uint8_t* output,

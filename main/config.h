@@ -61,6 +61,7 @@ static_assert(THROTTLE_SOURCE == ThrottleSource::Trigger || THROTTLE_SOURCE == T
 #define CONTROL_LOOP_PERIOD_MS 5
 #define ARM_THROTTLE_MAX 10
 #define BIND_DURATION_US 2000000
+#define PREARM_MODE_TIMEOUT_US 2000000
 #define TELEMETRY_RX_DEADLINE_US 4400
 
 static_assert(CONTROL_LOOP_PERIOD_MS == 5, "NFE Silverware telemetry expects a 5 ms packet period");

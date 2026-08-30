@@ -1,8 +1,25 @@
 #include "pc_telemetry_protocol.h"
 
+#include "../radio/nfe_silverware_profile.h"
+
 #include <string.h>
 
 namespace {
+
+inline constexpr uint8_t EXTENDED_FLIGHT_PAGE = 1;
+inline constexpr uint8_t FLIGHT_FLAG_LEVEL = 1U << 3;
+inline constexpr uint8_t FLIGHT_FLAG_RACE = 1U << 4;
+inline constexpr uint8_t FLIGHT_FLAG_HORIZON = 1U << 5;
+inline constexpr uint8_t FLIGHT_FLAG_PID_PROFILE = 1U << 6;
+inline constexpr uint8_t FLIGHT_CONFIG_MASK =
+    FLIGHT_FLAG_LEVEL | FLIGHT_FLAG_RACE | FLIGHT_FLAG_HORIZON | FLIGHT_FLAG_PID_PROFILE;
+
+static_assert(static_cast<uint8_t>(NFE_SILVERWARE_AUX_LEVEL) == PC_TELEMETRY_AUX_LEVEL &&
+                  static_cast<uint8_t>(NFE_SILVERWARE_AUX_RACE) == PC_TELEMETRY_AUX_RACE &&
+                  static_cast<uint8_t>(NFE_SILVERWARE_AUX_HORIZON) == PC_TELEMETRY_AUX_HORIZON &&
+                  static_cast<uint8_t>(NFE_SILVERWARE_AUX_PID_PROFILE) == PC_TELEMETRY_AUX_PID_PROFILE &&
+                  static_cast<uint8_t>(NFE_SILVERWARE_AUX_LEDS) == PC_TELEMETRY_AUX_LEDS,
+              "Saved AUX and PC telemetry flag layouts differ");
 
 void write_u16_be(uint8_t* output, uint16_t value) {
     output[0] = static_cast<uint8_t>(value >> 8);
@@ -137,6 +154,22 @@ void pc_telemetry_make_sample(PcTelemetrySample* sample, const uint8_t* packet, 
     sample->sequence = sequence;
     sample->timestampUs = timestamp_us;
     memcpy(sample->packet, packet, BAYANG_PACKET_SIZE);
+}
+
+bool pc_telemetry_overlay_saved_flight_config(uint8_t* packet, uint8_t saved_aux_flags) {
+    if (packet == nullptr || !bayang_check_telemetry(packet) || packet[0] != 0x86 ||
+        (packet[1] >> 6) != EXTENDED_FLIGHT_PAGE)
+        return false;
+
+    uint8_t saved_flags = 0;
+    saved_flags |= (saved_aux_flags & NFE_SILVERWARE_AUX_LEVEL) ? FLIGHT_FLAG_LEVEL : 0;
+    saved_flags |= (saved_aux_flags & NFE_SILVERWARE_AUX_RACE) ? FLIGHT_FLAG_RACE : 0;
+    saved_flags |= (saved_aux_flags & NFE_SILVERWARE_AUX_HORIZON) ? FLIGHT_FLAG_HORIZON : 0;
+    saved_flags |= (saved_aux_flags & NFE_SILVERWARE_AUX_PID_PROFILE) ? FLIGHT_FLAG_PID_PROFILE : 0;
+    packet[13] = (packet[13] & ~FLIGHT_CONFIG_MASK) | saved_flags;
+
+    packet[BAYANG_PACKET_SIZE - 1] = bayang_calculate_checksum(packet);
+    return true;
 }
 
 uint16_t pc_telemetry_crc16_ccitt_false(const uint8_t* data, size_t length) {

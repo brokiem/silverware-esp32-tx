@@ -6,16 +6,26 @@
 
 | State | TX behavior |
 | --- | --- |
-| `WAIT_GAMEPAD` | Send centered controls with zero throttle |
-| `LOCKED` | Send centered controls with zero throttle |
+| `WAIT_GAMEPAD` | Send Acro, centered controls, zero throttle, and all AUX channels off |
+| `LOCKED` | Send Acro, centered controls, zero throttle, and all AUX channels off |
 | `BINDING` | Send bind packets for two seconds |
+| `PREARM_MODE` | Send the saved mode/profile with centered controls, zero throttle, and CH5 off |
 | `ACTIVE` | Send gamepad controls every 5 ms |
-| `GAMEPAD_FAILSAFE` | Send centered controls with zero throttle |
+| `GAMEPAD_FAILSAFE` | Send Acro, centered controls, zero throttle, and all AUX channels off |
 | `RADIO_ERROR` | Stop transmission until the next reboot |
 
 A recovered gamepad always returns the TX to `LOCKED`. The user must press Start again.
 
 A binding operation also returns the TX to `LOCKED`. Binding never arms the FC.
+
+Pressing Start at zero throttle enters `PREARM_MODE`. The TX does not enable CH5
+or pass through stick controls until a fresh extended flight telemetry page
+confirms the saved flight mode and PID profile and reports that the FC is still
+disarmed. The FC LED setting travels in the same confirmed control packet, but
+the FC telemetry protocol does not report LED state separately. Legacy
+telemetry cannot echo these fields, so a fresh response instead confirms receipt
+of a pre-arm packet. Missing confirmation, moving throttle, or cancelling
+returns the TX to `LOCKED`.
 
 ## Task design
 

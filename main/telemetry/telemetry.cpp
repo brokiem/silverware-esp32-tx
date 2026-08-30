@@ -79,6 +79,7 @@ void clear_extended_data() {
     for (float& motor : current_telemetry.motorOutputPercent)
         motor = 0.0f;
     current_telemetry.flightTimeSeconds = 0;
+    current_telemetry.lastFlightPageUs = 0;
     current_telemetry.packetsLostPerSecond = 0;
     current_telemetry.linkQualityPercent = 0;
     current_telemetry.maximumRxGapMs = 0.0f;
@@ -113,7 +114,7 @@ void parse_control(const uint8_t* packet) {
     current_telemetry.extendedPagesSeen |= TELEMETRY_EXTENDED_PAGE_CONTROL;
 }
 
-void parse_flight(const uint8_t* packet) {
+void parse_flight(const uint8_t* packet, int64_t current_time_us) {
     uint8_t offset = 0;
     current_telemetry.rollDeg = read_signed_bits(packet, &offset, 12) * 0.1f;
     current_telemetry.pitchDeg = read_signed_bits(packet, &offset, 12) * 0.1f;
@@ -128,6 +129,7 @@ void parse_flight(const uint8_t* packet) {
     current_telemetry.lowVoltage = flags & (1U << 2);
     current_telemetry.pidProfile = flags & (1U << 6);
     current_telemetry.flightMode = decode_flight_mode(flags);
+    current_telemetry.lastFlightPageUs = current_time_us;
     current_telemetry.extendedPagesSeen |= TELEMETRY_EXTENDED_PAGE_FLIGHT;
 }
 
@@ -167,7 +169,7 @@ void parse_system(const uint8_t* packet) {
     current_telemetry.extendedPagesSeen |= TELEMETRY_EXTENDED_PAGE_SYSTEM;
 }
 
-void parse_extended(const uint8_t* packet) {
+void parse_extended(const uint8_t* packet, int64_t current_time_us) {
     const uint8_t common = packet[1];
     const uint8_t page = common >> 6;
     const uint8_t sequence = common & 0x0F;
@@ -184,7 +186,7 @@ void parse_extended(const uint8_t* packet) {
     if (page == 0)
         parse_control(packet);
     else if (page == 1)
-        parse_flight(packet);
+        parse_flight(packet, current_time_us);
     else if (page == 2)
         parse_power(packet);
     else
@@ -213,7 +215,7 @@ bool telemetry_parse(const uint8_t* packet, int64_t current_time_us) {
     }
 
     if (protocol == TelemetryProtocol::ExtendedV1) {
-        parse_extended(packet);
+        parse_extended(packet, current_time_us);
     } else {
         const uint16_t raw_centivolts = ((packet[3] & 0x07) << 8) | packet[4];
         const uint16_t comp_centivolts = ((packet[5] & 0x07) << 8) | packet[6];

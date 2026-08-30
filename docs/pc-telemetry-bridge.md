@@ -4,7 +4,10 @@
 
 The optional PC telemetry build exports two binary message types over the ESP32's UART0 USB connection:
 
-- Type `1`: every valid original `0x85` or extended `0x86` Bayang telemetry packet, unchanged.
+- Type `1`: every valid original `0x85` or extended `0x86` Bayang telemetry
+  packet. While the TX deliberately forces Acro in a locked or
+  gamepad-unavailable state, the exported extended flight page presents the
+  saved mode and PID profile instead.
 - Type `2`: a complete ESP32 transmitter-state snapshot at 20 Hz.
 
 Local-state snapshots continue when FC telemetry is absent. This lets a PC distinguish FC telemetry loss, gamepad loss, a locked safety state, and complete USB-transmitter disconnection.
@@ -55,9 +58,19 @@ The complete record, including its CRC, is COBS encoded and followed by one `0x0
 
 ROM boot text can appear first. The application writes an initial `0x00`; a reader must discard all input through that delimiter before parsing frames.
 
-## Type 1: raw FC telemetry
+## Type 1: FC telemetry
 
-Type `1` has a 15-byte payload containing an unmodified Bayang `0x85` or `0x86` packet. The decoded record is 31 bytes and its COBS frame is at most 33 bytes. The raw Bayang checksum remains in payload byte 14. Validate the bridge CRC first and the Bayang checksum second.
+Type `1` has a 15-byte payload containing a Bayang `0x85` or `0x86` packet.
+The decoded record is 31 bytes and its COBS frame is at most 33 bytes. The
+Bayang checksum remains in payload byte 14. Validate the bridge CRC first and
+the Bayang checksum second.
+
+The TX safety logic always parses the original FC packet. For PC presentation only,
+flight-page mode bits and the PID-profile bit are replaced with the saved AUX
+selection while the TX is `LOCKED`, waiting for a gamepad, or in gamepad
+failsafe. The checksum is recalculated after this overlay. `PREARM_MODE` and
+`ACTIVE` packets are exported without modification, so the arming confirmation
+and in-flight data continue to show the FC's actual state.
 
 ### Type-1 golden frame
 
@@ -112,6 +125,7 @@ Age values saturate at 65,534 ms. `0xFFFF` means that no update has ever been re
 | 4 | Active |
 | 5 | Gamepad failsafe |
 | 6 | Radio error |
+| 7 | Pre-arm mode confirmation |
 
 ### Status flags
 

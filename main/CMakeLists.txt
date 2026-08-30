@@ -15,6 +15,7 @@ idf_component_register(
         "telemetry/pc_telemetry_state.cpp"
         "telemetry/pc_telemetry_export.cpp"
         "safety/failsafe.cpp"
+        "safety/prearm_guard.cpp"
         "storage/settings.cpp"
         "storage/settings_core.cpp"
         "console/console.cpp"
@@ -32,6 +33,7 @@ set_source_files_properties(
     "telemetry/pc_telemetry_protocol.cpp"
     "telemetry/pc_telemetry_state.cpp"
     "safety/failsafe.cpp"
+    "safety/prearm_guard.cpp"
     "storage/settings_core.cpp"
     PROPERTIES COMPILE_OPTIONS "-Wundef"
 )

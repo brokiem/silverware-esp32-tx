@@ -34,9 +34,18 @@ Start only arms from `LOCKED` when throttle is zero. Press Start again to disarm
 
 B causes a local disarm. The TX sends a zero-throttle packet in the same RF cycle.
 
-The TX keeps the selected flight mode, PID profile, and FC LED setting while
-locked. CH5 and throttle remain off, so preserving these settings cannot arm the
-aircraft. The selections are saved when changed and restored after a reboot.
+The TX keeps the selected flight mode, PID profile, and FC LED setting in memory
+while locked, but transmits Acro with all AUX channels off to minimize disarmed
+FC work. The selections are saved when changed and restored after a reboot.
+
+After Start is pressed, the TX enters `PREARM_MODE`. It sends the saved mode,
+PID profile, and FC LED setting with CH5 off, zero throttle, and centered
+controls. With extended telemetry, full controls and CH5 are enabled only after
+a fresh FC flight page confirms the mode and PID profile and reports that the FC
+is still disarmed. Legacy telemetry cannot report these fields, so a fresh reply
+instead confirms that the FC received a pre-arm packet. Moving throttle above
+zero, pressing Start or B, losing the gamepad, or waiting two seconds without
+confirmation cancels arming.
 
 ## FC gesture shortcuts
 

@@ -21,7 +21,10 @@ flowchart TD
     linked --> locked[TX stays LOCKED<br/>and sends zero throttle]
     locked --> arm{Press Start at<br/>zero throttle?}
     arm -- No --> locked
-    arm -- Yes --> active[TX sends controls<br/>with CH5 on]
+    arm -- Yes --> prearm[TX restores saved AUX<br/>with controls blocked]
+    prearm --> confirmed{Fresh FC telemetry<br/>confirms packet/config?}
+    confirmed -- No or timeout --> locked
+    confirmed -- Yes --> active[TX sends controls<br/>with CH5 on]
     active --> stop{Start, B, or<br/>connection loss?}
     stop -- No --> active
     stop -- Yes --> locked

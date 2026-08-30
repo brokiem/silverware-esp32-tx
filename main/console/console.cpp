@@ -30,6 +30,8 @@ const char* state_name(SystemState state) {
             return "GAMEPAD_FAILSAFE";
         case STATE_RADIO_ERROR:
             return "RADIO_ERROR";
+        case STATE_PREARM_MODE:
+            return "PREARM_MODE";
         default:
             return "UNKNOWN";
     }

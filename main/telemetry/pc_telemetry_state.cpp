@@ -5,7 +5,8 @@
 namespace {
 
 static_assert(STATE_BOOT == 0 && STATE_WAIT_GAMEPAD == 1 && STATE_BINDING == 2 && STATE_LOCKED == 3 &&
-                  STATE_ACTIVE == 4 && STATE_GAMEPAD_FAILSAFE == 5 && STATE_RADIO_ERROR == 6,
+                  STATE_ACTIVE == 4 && STATE_GAMEPAD_FAILSAFE == 5 && STATE_RADIO_ERROR == 6 &&
+                  STATE_PREARM_MODE == 7,
               "SystemState wire values changed");
 
 uint16_t age_ms(int64_t now_us, int64_t update_us, bool has_update) {

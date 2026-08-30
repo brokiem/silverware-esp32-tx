@@ -48,7 +48,7 @@ pio run -e esp32dev -t upload
 
 ## Required checks
 
-Run both commands before you commit:
+Run these checks before you commit:
 
 ```sh
 pio test -e native

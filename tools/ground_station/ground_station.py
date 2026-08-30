@@ -37,6 +37,7 @@ SYSTEM_STATES = {
     4: "ACTIVE",
     5: "GAMEPAD FAILSAFE",
     6: "RADIO ERROR",
+    7: "PREARM MODE",
 }
 
 STATUS_FLAGS = (
