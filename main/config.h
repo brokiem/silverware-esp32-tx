@@ -52,7 +52,7 @@ static_assert(THROTTLE_SOURCE == ThrottleSource::Trigger || THROTTLE_SOURCE == T
 #define ROLL_EXPO 0.0f
 #define PITCH_EXPO 0.0f
 #define YAW_EXPO 0.0f
-#define THROTTLE_MAX_PERCENT 75
+#define THROTTLE_MAX_PERCENT 50
 
 static_assert(THROTTLE_MAX_PERCENT >= 0 && THROTTLE_MAX_PERCENT <= 100,
               "Throttle maximum must be between 0 and 100 percent");

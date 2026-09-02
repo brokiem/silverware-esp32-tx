@@ -15,7 +15,7 @@
 | Right stick left or right | Roll |
 
 The center and lower half of the throttle axis produce zero throttle. The upper
-half spans from zero to the configured 75% maximum throttle. This behavior
+half spans from zero to the configured 50% maximum throttle. This behavior
 applies to the default half-stick configuration.
 
 ## Buttons
